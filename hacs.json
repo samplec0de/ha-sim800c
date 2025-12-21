@@ -1,5 +1,6 @@
 {
-    "name": "Integration blueprint",
-    "homeassistant": "2025.2.4",
-    "hacs": "2.0.5"
+    "name": "SIM800C",
+    "homeassistant": "2023.12.0",
+    "hacs": "1.32.0",
+    "render_readme": true
 }

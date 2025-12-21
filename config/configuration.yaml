@@ -5,8 +5,25 @@ default_config:
 homeassistant:
   debug: true
 
+# https://www.home-assistant.io/integrations/http/
+http:
+  server_host: 0.0.0.0
+  server_port: 8123
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 0.0.0.0/0
+  cors_allowed_origins:
+    - "*"
+
 # https://www.home-assistant.io/integrations/logger/
 logger:
   default: info
   logs:
-    custom_components.integration_blueprint: debug
+    custom_components.sim800c: debug
+
+# SIM800C Notification (SMS + future call support)
+notify:
+  - name: sms
+    platform: sim800c
+    device: /dev/ttyUSB0  # Change this to your SIM800C device path
+    baud_rate: 9600  # Optional, defaults to 9600
