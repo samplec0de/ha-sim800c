@@ -1,0 +1,11 @@
+{
+  "domain": "sim800c",
+  "name": "SIM800C",
+  "codeowners": ["@samplec0de"],
+  "config_flow": false,
+  "documentation": "https://github.com/samplec0de/ha-sim800c",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/samplec0de/ha-sim800c/issues",
+  "requirements": ["pyserial>=3.5"],
+  "version": "0.1.0"
+}
