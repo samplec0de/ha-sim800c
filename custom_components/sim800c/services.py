@@ -5,20 +5,24 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import voluptuous as vol
+from homeassistant.core import SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
     ATTR_FORCE_UNICODE,
     ATTR_MESSAGE,
+    ATTR_RING_DURATION,
     ATTR_TARGET,
     DOMAIN,
+    SERVICE_CALL,
+    SERVICE_HANG_UP,
     SERVICE_SEND_SMS,
 )
 from .modem import ModemError
 
 if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant, ServiceCall
+    from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse
 
     from .hub import ModemHub
 
@@ -30,16 +34,31 @@ SEND_SMS_SCHEMA = vol.Schema(
     }
 )
 
+CALL_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_TARGET): cv.string,
+        vol.Optional(ATTR_RING_DURATION): vol.All(
+            vol.Coerce(float), vol.Range(min=1, max=120)
+        ),
+    }
+)
+
+HANG_UP_SCHEMA = vol.Schema({})
+
+
+def _first_hub(hass: HomeAssistant) -> ModemHub:
+    hubs: list[ModemHub] = list(hass.data[DOMAIN].values())
+    if not hubs:
+        msg = "No SIM800C modem configured"
+        raise HomeAssistantError(msg)
+    return hubs[0]
+
 
 def async_register_services(hass: HomeAssistant) -> None:
-    """Register the sim800c.send_sms service."""
+    """Register the sim800c.send_sms, sim800c.call and sim800c.hang_up services."""
 
     async def _handle_send_sms(call: ServiceCall) -> None:
-        hubs: list[ModemHub] = list(hass.data[DOMAIN].values())
-        if not hubs:
-            msg = "No SIM800C modem configured"
-            raise HomeAssistantError(msg)
-        hub = hubs[0]
+        hub = _first_hub(hass)
         try:
             await hub.async_send_sms(
                 call.data[ATTR_TARGET],
@@ -50,7 +69,39 @@ def async_register_services(hass: HomeAssistant) -> None:
             msg = f"SMS send failed: {err}"
             raise HomeAssistantError(msg) from err
 
+    async def _handle_call(call: ServiceCall) -> ServiceResponse:
+        hub = _first_hub(hass)
+        kwargs = {}
+        if ATTR_RING_DURATION in call.data:
+            kwargs["ring_duration"] = call.data[ATTR_RING_DURATION]
+        try:
+            result = await hub.async_call(call.data[ATTR_TARGET], **kwargs)
+        except ModemError as err:
+            msg = f"Call failed: {err}"
+            raise HomeAssistantError(msg) from err
+        return {"answered": result.answered, "state": result.final_state}
+
+    async def _handle_hang_up(_call: ServiceCall) -> None:
+        hub = _first_hub(hass)
+        try:
+            await hub.async_hang_up()
+        except ModemError as err:
+            msg = f"Hang up failed: {err}"
+            raise HomeAssistantError(msg) from err
+
     if not hass.services.has_service(DOMAIN, SERVICE_SEND_SMS):
         hass.services.async_register(
             DOMAIN, SERVICE_SEND_SMS, _handle_send_sms, schema=SEND_SMS_SCHEMA
+        )
+    if not hass.services.has_service(DOMAIN, SERVICE_CALL):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_CALL,
+            _handle_call,
+            schema=CALL_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+    if not hass.services.has_service(DOMAIN, SERVICE_HANG_UP):
+        hass.services.async_register(
+            DOMAIN, SERVICE_HANG_UP, _handle_hang_up, schema=HANG_UP_SCHEMA
         )

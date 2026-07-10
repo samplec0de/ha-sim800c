@@ -6,7 +6,14 @@ from custom_components.sim800c.modem.errors import (
     NotRegistered,
     SmsSendError,
 )
-from custom_components.sim800c.modem.modem import Modem
+from custom_components.sim800c.modem.modem import (
+    CALL_DIR_INCOMING,
+    CALL_DIR_OUTGOING,
+    CALL_STAT_ACTIVE,
+    CALL_STAT_ALERTING,
+    CALL_STAT_INCOMING,
+    Modem,
+)
 from custom_components.sim800c.modem.transport import Transport
 from tests.conftest import FakeSerial
 
@@ -127,3 +134,85 @@ async def test_dial_and_hangup_send_atd_and_ath():
     joined = b"".join(fake.written)
     assert b"ATD+79990001122;\r\n" in joined
     assert b"ATH\r\n" in joined
+
+
+async def test_initialize_enables_caller_id():
+    modem, transport, fake = make_modem(
+        [
+            ("ATE0", b"\r\nOK\r\n"),
+            ("AT\\+CMGF=1", b"\r\nOK\r\n"),
+            ("AT\\+CLIP=1", b"\r\nOK\r\n"),
+        ]
+    )
+    await transport.connect()
+    await modem.initialize()
+    assert b"AT+CLIP=1\r\n" in b"".join(fake.written)
+
+
+async def test_initialize_tolerates_clip_rejection():
+    # Some SIM/network combos reject AT+CLIP=1; initialize must not blow up.
+    modem, transport, _ = make_modem(
+        [
+            ("ATE0", b"\r\nOK\r\n"),
+            ("AT\\+CMGF=1", b"\r\nOK\r\n"),
+            ("AT\\+CLIP=1", b"\r\n+CME ERROR: 3\r\n"),
+        ]
+    )
+    await transport.connect()
+    await modem.initialize()  # must not raise
+
+
+async def test_get_current_call_none_when_idle():
+    modem, transport, _ = make_modem([("AT\\+CLCC", b"\r\nOK\r\n")])
+    await transport.connect()
+    assert await modem.get_current_call() is None
+
+
+async def test_get_current_call_outgoing_alerting():
+    modem, transport, _ = make_modem(
+        [("AT\\+CLCC", b'\r\n+CLCC: 1,0,3,0,0,"+79990001122",145\r\n\r\nOK\r\n')]
+    )
+    await transport.connect()
+    call = await modem.get_current_call()
+    assert call is not None
+    assert call.direction == CALL_DIR_OUTGOING
+    assert call.state == CALL_STAT_ALERTING
+    assert call.number == "+79990001122"
+    assert not call.is_incoming
+    assert not call.is_answered
+
+
+async def test_get_current_call_outgoing_answered():
+    modem, transport, _ = make_modem(
+        [("AT\\+CLCC", b'\r\n+CLCC: 1,0,0,0,0,"+79990001122",145\r\n\r\nOK\r\n')]
+    )
+    await transport.connect()
+    call = await modem.get_current_call()
+    assert call is not None
+    assert call.state == CALL_STAT_ACTIVE
+    assert call.is_answered
+
+
+async def test_get_current_call_incoming_with_number():
+    modem, transport, _ = make_modem(
+        [("AT\\+CLCC", b'\r\n+CLCC: 1,1,4,0,0,"+79990001122",145\r\n\r\nOK\r\n')]
+    )
+    await transport.connect()
+    call = await modem.get_current_call()
+    assert call is not None
+    assert call.direction == CALL_DIR_INCOMING
+    assert call.state == CALL_STAT_INCOMING
+    assert call.number == "+79990001122"
+    assert call.is_incoming
+
+
+async def test_get_current_call_incoming_without_number():
+    # Withheld / no-CLIP caller: number field absent.
+    modem, transport, _ = make_modem(
+        [("AT\\+CLCC", b"\r\n+CLCC: 1,1,4,0,0\r\n\r\nOK\r\n")]
+    )
+    await transport.connect()
+    call = await modem.get_current_call()
+    assert call is not None
+    assert call.is_incoming
+    assert call.number is None

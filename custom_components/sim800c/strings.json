@@ -16,5 +16,43 @@
     "abort": {
       "already_configured": "This device is already configured."
     }
+  },
+  "services": {
+    "send_sms": {
+      "name": "Send SMS",
+      "description": "Send an SMS message via the SIM800C module.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "Phone number(s) in international format (+7...)."
+        },
+        "message": {
+          "name": "Message",
+          "description": "Message text (Cyrillic and other Unicode supported)."
+        },
+        "force_unicode": {
+          "name": "Force Unicode",
+          "description": "Always send as UCS2 even if the text fits GSM 7-bit."
+        }
+      }
+    },
+    "call": {
+      "name": "Call",
+      "description": "Place a voice call to a number and automatically hang up after it rings. Returns whether the call was answered. No audio is played.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "Phone number in international format (+7...)."
+        },
+        "ring_duration": {
+          "name": "Ring duration",
+          "description": "Seconds to let the call ring before hanging up (1-120). The call also ends early if the other party answers or hangs up."
+        }
+      }
+    },
+    "hang_up": {
+      "name": "Hang up",
+      "description": "Hang up the current call, if any."
+    }
   }
 }

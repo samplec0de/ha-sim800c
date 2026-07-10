@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-11
+
+### Added
+- `sim800c.call` service: place a voice call with automatic hang-up after a configurable `ring_duration` (1–120s, default 30). Returns a response indicating whether the call was answered (`{"answered": bool, "state": "answered" | "no_answer" | "ended"}`). No audio is played — intended for ring alerts / missed-call notifications and answer detection.
+- `sim800c.hang_up` service to end the current call.
+- `binary_sensor.sim800c_incoming_call`: turns on while an incoming call rings, exposing the caller's number (via `+CLIP`) in its `caller` attribute.
+- `sim800c_incoming_call` event, fired with `{"caller": "+7..."}` on the rising edge of each incoming call.
+- `sensor.sim800c_call_state`: live call state (`idle` / `dialing` / `ringing` / `active` / `incoming`).
+- Modem layer: `Modem.get_current_call()` (parses `AT+CLCC` into direction/state/caller number) and automatic `AT+CLIP=1` caller-ID enablement during initialization.
+- Harness: `call` and `monitor` subcommands in `scripts/modem_harness.py` for testing calls against real hardware.
+
+### Changed
+- The modem hub now runs a background loop that polls `AT+CLCC` to detect incoming calls, serialized with SMS access through the existing transport lock.
+
 ## [0.2.0] - 2026-07-11
 
 ### Added
