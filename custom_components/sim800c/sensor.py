@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -11,9 +11,18 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import SIGNAL_STRENGTH_DECIBELS_MILLIWATT, EntityCategory
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 
-from .const import DOMAIN
+from .const import (
+    CALL_STATE_ACTIVE,
+    CALL_STATE_DIALING,
+    CALL_STATE_IDLE,
+    CALL_STATE_INCOMING,
+    CALL_STATE_RINGING,
+    DOMAIN,
+    SIGNAL_CALL_UPDATE,
+)
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -33,7 +42,11 @@ async def async_setup_entry(
     """Set up SIM800C diagnostic sensors for a config entry."""
     hub: ModemHub = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        [SignalSensor(hub, entry.entry_id), NetworkSensor(hub, entry.entry_id)]
+        [
+            SignalSensor(hub, entry.entry_id),
+            NetworkSensor(hub, entry.entry_id),
+            CallStateSensor(hub, entry.entry_id),
+        ]
     )
 
 
@@ -93,3 +106,43 @@ class NetworkSensor(_BaseSensor):
     def native_value(self) -> str:
         """Return the current registration state."""
         return "registered" if self._hub.registered else "searching"
+
+
+class CallStateSensor(SensorEntity):
+    """Current call state (idle/dialing/ringing/active/incoming), pushed live."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Call state"
+    _attr_should_poll = False
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options: ClassVar[list[str]] = [
+        CALL_STATE_IDLE,
+        CALL_STATE_DIALING,
+        CALL_STATE_RINGING,
+        CALL_STATE_ACTIVE,
+        CALL_STATE_INCOMING,
+    ]
+
+    def __init__(self, hub: ModemHub, entry_id: str) -> None:
+        """Bind the sensor to its owning modem hub and config entry."""
+        self._hub = hub
+        self._attr_unique_id = f"{entry_id}_call_state"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="SIM800C",
+            manufacturer="SIMCom",
+            model="SIM800C",
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to modem call-state updates pushed by the hub."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_CALL_UPDATE, self.async_write_ha_state
+            )
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return the current call state string."""
+        return self._hub.call_state
