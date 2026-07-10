@@ -14,9 +14,14 @@ import asyncio
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# Import the modem package directly (as a top-level package) so this harness
+# stays standalone: importing via `custom_components.sim800c.modem` would run
+# `custom_components/sim800c/__init__.py`, which pulls in Home Assistant.
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[1] / "custom_components" / "sim800c")
+)
 
-from custom_components.sim800c.modem import Modem, Transport
+from modem import Modem, Transport
 
 
 async def main() -> int:
