@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SIM800C GSM module",
+        "data": {
+          "device": "Serial device path",
+          "baud_rate": "Baud rate"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not talk to the modem on that device.",
+      "not_registered": "Modem is not registered on the network (check SIM/antenna)."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  }
+}

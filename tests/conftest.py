@@ -4,6 +4,14 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(enable_custom_integrations):
+    """Make custom_components discoverable to Home Assistant's loader in tests."""
+    yield
+
 
 class FakeSerial:
     """A scripted stand-in for serial.Serial.
