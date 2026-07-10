@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Standalone SIM800C harness — run on the machine with the modem attached.
+"""
+Standalone SIM800C harness — run on the machine with the modem attached.
 
 Usage:
   python3 scripts/modem_harness.py --device /dev/ttyUSB0 status
@@ -15,10 +16,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from custom_components.sim800c.modem import Modem, Transport  # noqa: E402
+from custom_components.sim800c.modem import Modem, Transport
 
 
 async def main() -> int:
+    """Parse CLI args and run the requested modem command against real hardware."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="/dev/ttyUSB0")
     parser.add_argument("--baud", type=int, default=9600)

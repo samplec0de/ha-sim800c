@@ -1,90 +1,80 @@
-# SIM800C Integration v0.1.0 - First Release! 🎉
+# SIM800C Integration v0.2.0 🎉
 
-Send SMS notifications from Home Assistant using SIM800C GSM modules.
+Config-flow setup, a proper `send_sms` service, and a rewritten modem layer that serializes all AT-command traffic through a single hub.
 
-## ✨ Features
+## ⚠️ Breaking Changes
 
-### Core Functionality
-- 📱 **SMS Notifications** - Send SMS through Home Assistant's `notify` service
-- 🌍 **Unicode Support** - Full support for Cyrillic, Chinese, Arabic, and other scripts via UCS2 encoding
-- ⚡ **Fast Delivery** - Optimized to ~4-5 seconds per SMS
-- 📞 **Smart Phone Formatting** - Automatically adds + prefix if missing
-- 👥 **Multiple Recipients** - Send to multiple phone numbers at once
+- **The `notify` platform is gone.** Remove any `notify:` block referencing the `sim800c` platform from `configuration.yaml`.
+- **`notify.sms` is replaced by `sim800c.send_sms`.** Update automations/scripts to call the new service (see below).
 
-### Configuration
-- 📝 **YAML-Based** - Simple configuration in `configuration.yaml`
-- ⚙️ **Configurable Baud Rate** - Defaults to 9600, customizable
-- 🔍 **Debug Logging** - Detailed logs for troubleshooting
+## ✨ What's New
 
-### Developer Experience
-- 🐳 **Dev Container** - Ready-to-use development environment
-- 🛠️ **Helper Scripts** - USB permissions fix, module testing
-- 📚 **Comprehensive Docs** - Installation, usage, and troubleshooting guides
+### Config Flow Setup
+- 🖱️ **UI Setup** - Add the integration from Settings → Devices & Services → Add Integration → SIM800C. No more YAML configuration.
+- ✅ **Validated on Setup** - The config flow connects to the modem and confirms network registration before creating the entry.
 
-## 📦 Installation
+### `sim800c.send_sms` Service
+- 📱 Replaces `notify.sms` with fields `target`, `message`, and `force_unicode`.
+- 👥 `target` accepts a single phone number or a list of numbers.
+- 🌍 Messages are automatically encoded as GSM 7-bit or UCS2 based on content; set `force_unicode: true` to force UCS2.
+
+```yaml
+service: sim800c.send_sms
+data:
+  target: "+79990001122"
+  message: "Hello from Home Assistant!"
+```
+
+### Serialized Modem Hub
+- 🔒 All modem access (setup, service calls, diagnostics) is queued through a single hub, so consecutive SMS sends no longer need manual delays between them.
+- 🧾 Token-based AT response parsing removes false error logging seen with the previous substring-based approach.
+
+### Diagnostic Sensors
+- 📶 `sensor.sim800c_signal` - Signal strength in dBm.
+- 📡 `sensor.sim800c_network` - Network registration state (`registered` or `searching`).
+
+## 📦 Installation / Upgrade
 
 ### Via HACS (Recommended)
-1. Add custom repository: `https://github.com/samplec0de/ha-sim800c`
-2. Install "SIM800C" integration
-3. Restart Home Assistant
+1. Update the "SIM800C" integration via HACS.
+2. Restart Home Assistant.
+3. Remove the old `notify:` block for the `sim800c` platform from `configuration.yaml`, if present.
+4. Add the integration via Settings → Devices & Services → Add Integration → SIM800C.
 
 ### Manual
-1. Copy `custom_components/sim800c` to your HA config directory
-2. Restart Home Assistant
+1. Copy `custom_components/sim800c` to your HA config directory, overwriting the previous version.
+2. Restart Home Assistant.
+3. Remove the old `notify:` block for the `sim800c` platform from `configuration.yaml`, if present.
+4. Add the integration via Settings → Devices & Services → Add Integration → SIM800C.
 
 ## 🔧 Quick Start
 
-Add to `configuration.yaml`:
+Add the integration via the UI, then send SMS:
 
 ```yaml
-notify:
-  - name: sms
-    platform: sim800c
-    device: /dev/ttyUSB0
-    baud_rate: 9600  # Optional
-```
-
-Send SMS:
-
-```yaml
-service: notify.sms
+service: sim800c.send_sms
 data:
-  target: "+1234567890"
+  target: "+79990001122"
   message: "Hello from Home Assistant! 🎉"
 ```
 
 ## 🐛 Known Issues & Limitations
 
-- SMS only (voice calls planned for v0.2.0)
-- Requires serial device access permissions (see docs)
-- Phone number must start with + (added automatically if missing)
-
-## 🧪 Tested On
-
-- ✅ SIM800C modules with USB interface
-- ✅ Home Assistant 2023.12.0+
-- ✅ MegaFon network (Russia)
-- ✅ Unicode messages (Cyrillic confirmed working)
+- SMS only (no voice call support).
+- Requires serial device access permissions (see [README.md](README.md)).
+- Phone number must be in international format (`+7...`).
 
 ## 📖 Documentation
 
-Full documentation available in [README.md](README.md)
+Full documentation available in [README.md](README.md).
 
 ## 🙏 Acknowledgments
 
 - Based on [integration_blueprint](https://github.com/ludeeus/integration_blueprint) by @ludeeus
 - Inspired by [homeassistant-gsm-call](https://github.com/black-roland/homeassistant-gsm-call)
 
-## 🔮 What's Next?
-
-Planned for v0.2.0:
-- Voice call support
-- SMS delivery status
-- Signal strength sensor
-- Network operator sensor
-
 ---
 
-**Enjoy your new SMS integration!** 📨
+**Enjoy the rebuilt SIM800C integration!** 📨
 
 If you encounter any issues, please [open an issue](https://github.com/samplec0de/ha-sim800c/issues).

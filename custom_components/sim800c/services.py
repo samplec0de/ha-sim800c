@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import voluptuous as vol
-from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 
@@ -14,8 +15,12 @@ from .const import (
     DOMAIN,
     SERVICE_SEND_SMS,
 )
-from .hub import ModemHub
 from .modem import ModemError
+
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant, ServiceCall
+
+    from .hub import ModemHub
 
 SEND_SMS_SCHEMA = vol.Schema(
     {
@@ -27,10 +32,13 @@ SEND_SMS_SCHEMA = vol.Schema(
 
 
 def async_register_services(hass: HomeAssistant) -> None:
+    """Register the sim800c.send_sms service."""
+
     async def _handle_send_sms(call: ServiceCall) -> None:
         hubs: list[ModemHub] = list(hass.data[DOMAIN].values())
         if not hubs:
-            raise HomeAssistantError("No SIM800C modem configured")
+            msg = "No SIM800C modem configured"
+            raise HomeAssistantError(msg)
         hub = hubs[0]
         try:
             await hub.async_send_sms(
@@ -39,7 +47,8 @@ def async_register_services(hass: HomeAssistant) -> None:
                 call.data[ATTR_FORCE_UNICODE],
             )
         except ModemError as err:
-            raise HomeAssistantError(f"SMS send failed: {err}") from err
+            msg = f"SMS send failed: {err}"
+            raise HomeAssistantError(msg) from err
 
     if not hass.services.has_service(DOMAIN, SERVICE_SEND_SMS):
         hass.services.async_register(

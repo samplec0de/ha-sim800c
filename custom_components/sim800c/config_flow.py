@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_DEVICE
-from homeassistant.data_entry_flow import FlowResult
 
 from .const import CONF_BAUD_RATE, DEFAULT_BAUD_RATE, DOMAIN, LOGGER
 from .hub import ModemHub
 from .modem import ModemError
+
+if TYPE_CHECKING:
+    from homeassistant.data_entry_flow import FlowResult
 
 
 class SIM800CConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -22,6 +24,7 @@ class SIM800CConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
+        """Handle the initial user setup step."""
         errors: dict[str, str] = {}
         if user_input is not None:
             device = user_input[CONF_DEVICE]
@@ -56,6 +59,4 @@ class SIM800CConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_BAUD_RATE, default=DEFAULT_BAUD_RATE): int,
             }
         )
-        return self.async_show_form(
-            step_id="user", data_schema=schema, errors=errors
-        )
+        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
