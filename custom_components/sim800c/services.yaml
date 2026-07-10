@@ -1,0 +1,26 @@
+send_sms:
+  name: Send SMS
+  description: Send an SMS message via the SIM800C module.
+  fields:
+    target:
+      name: Target
+      description: Phone number(s) in international format (+7...).
+      required: true
+      example: "+79990001122"
+      selector:
+        text:
+    message:
+      name: Message
+      description: Message text (Cyrillic and other Unicode supported).
+      required: true
+      example: "Привет!"
+      selector:
+        text:
+          multiline: true
+    force_unicode:
+      name: Force Unicode
+      description: Always send as UCS2 even if the text fits GSM 7-bit.
+      required: false
+      default: false
+      selector:
+        boolean:
