@@ -6,9 +6,11 @@ Currently supports **SMS notifications**.
 
 ## Features
 
-- Send SMS messages using Home Assistant's `notify` service
-- Full Unicode support (Cyrillic, Chinese, Arabic, etc.) via UCS2 encoding
-- Simple YAML configuration
+- Send SMS messages via the `sim800c.send_sms` service
+- Full Unicode support (Cyrillic, Chinese, Arabic, etc.) with automatic GSM 7-bit / UCS2 encoding
+- UI-based setup via config flow (no YAML editing required)
+- Diagnostic sensors for signal strength and network registration
+- Serialized modem access, so multiple SMS sends never race on the serial port
 - Works with SIM800C GSM modules connected via USB or serial
 
 ## Installation
@@ -26,15 +28,12 @@ Currently supports **SMS notifications**.
 
 ## Configuration
 
-Add the following to your `configuration.yaml`:
+Configuration is done entirely through the Home Assistant UI (config flow) — no YAML editing required.
 
-```yaml
-notify:
-  - name: sms
-    platform: sim800c
-    device: /dev/ttyUSB0  # Your SIM800C device path
-    baud_rate: 9600  # Optional, defaults to 9600
-```
+1. Go to **Settings → Devices & Services → Add Integration**.
+2. Search for **SIM800C** and select it.
+3. Enter your modem's **device path** (e.g. `/dev/ttyUSB0`) and **baud rate** (defaults to `9600`).
+4. Home Assistant will connect to the modem and verify it is registered on the network before creating the entry.
 
 ### Finding Your Device Path
 
@@ -50,25 +49,33 @@ Or use the "Hardware" tab in Settings > System > Hardware within Home Assistant 
 
 ### Sending SMS
 
-Use the `notify.sms` service to send an SMS message:
+Use the `sim800c.send_sms` service to send an SMS message:
 
 ```yaml
-service: notify.sms
+service: sim800c.send_sms
 data:
-  target: "+1234567890"
+  target: "+79990001122"
   message: "Hello from Home Assistant!"
 ```
+
+`target` accepts either a single phone number or a list of numbers. The optional `force_unicode` field forces UCS2 encoding even when the message would otherwise fit GSM 7-bit encoding:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `target` | Yes | Phone number(s) in international format (`+7...`). Accepts a single string or a list. |
+| `message` | Yes | Message text. Cyrillic and other Unicode text is supported. |
+| `force_unicode` | No | Always send as UCS2 even if the text fits GSM 7-bit. Defaults to `false`. |
 
 ### Multiple Recipients
 
 You can send to multiple phone numbers:
 
 ```yaml
-service: notify.sms
+service: sim800c.send_sms
 data:
   target:
-    - "+1234567890"
-    - "+9876543210"
+    - "+79990001122"
+    - "+79990003344"
   message: "Alert: Motion detected!"
 ```
 
@@ -82,15 +89,15 @@ automation:
         entity_id: alarm_control_panel.home
         to: "triggered"
     actions:
-      - action: notify.sms
+      - action: sim800c.send_sms
         data:
-          target: "+1234567890"
+          target: "+79990001122"
           message: "⚠️ Alarm triggered at home!"
 ```
 
 ## Unicode Support
 
-This integration uses UCS2 encoding, which means you can send messages in any language, including:
+Messages are automatically encoded as GSM 7-bit when the text fits that character set, and UCS2 otherwise — so you can send messages in any language without any configuration, including:
 
 - Cyrillic (Russian, Ukrainian, Bulgarian, etc.)
 - Chinese
@@ -101,11 +108,22 @@ This integration uses UCS2 encoding, which means you can send messages in any la
 Example:
 
 ```yaml
-service: notify.sms
+service: sim800c.send_sms
 data:
-  target: "+1234567890"
+  target: "+79990001122"
   message: "Привет! Это сообщение на русском языке."
 ```
+
+Set `force_unicode: true` if you need to force UCS2 encoding for a message that would otherwise be sent as GSM 7-bit.
+
+## Diagnostic Sensors
+
+The integration exposes two diagnostic sensors per configured modem:
+
+- `sensor.sim800c_signal` — signal strength in dBm.
+- `sensor.sim800c_network` — network registration state (`registered` or `searching`).
+
+Both sensors are polled periodically and can be used in automations or dashboards to monitor modem health.
 
 ## Troubleshooting
 
@@ -205,19 +223,16 @@ This project includes a devcontainer configuration for easy development in VSCod
 4. Start Home Assistant with: `bash scripts/develop`
 5. Access at http://localhost:8123
 
-### Testing SMS
+### Testing Against Real Hardware
 
-Use the test script to verify your SIM800C module:
+Use `scripts/modem_harness.py` to talk to a real SIM800C module outside of Home Assistant:
 
 ```bash
-python3 test_sim800c.py
+python3 scripts/modem_harness.py --device /dev/ttyUSB0 status
+python3 scripts/modem_harness.py --device /dev/ttyUSB0 send +79990001122 "Тест"
 ```
 
-This will check:
-- Module connectivity
-- SIM card status
-- Network registration
-- Signal strength
+`status` reports network registration and signal strength; `send` sends an SMS and prints the `+CMGS` reference.
 
 ## License
 

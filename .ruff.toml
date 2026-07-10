@@ -15,6 +15,23 @@ ignore = [
     "ISC001", # incompatible with formatter
 ]
 
+[lint.per-file-ignores]
+# CLI harness intentionally prints to stdout for a human operator.
+"scripts/modem_harness.py" = ["T201"]
+# Test files: asserts are the point of the test, docstrings/annotations on every
+# test function add noise without value, magic numbers in assertions are the
+# expected values under test, and unused fixture/lambda args are standard
+# pytest/test-double idioms.
+"tests/**/*.py" = [
+    "S101",    # assert is the point of a test
+    "D100",    # module docstrings aren't needed for every test file
+    "D103",    # function docstrings aren't needed for every test function
+    "ANN001",  # test function args (fixtures) don't need type annotations
+    "ANN201",  # test functions don't need return type annotations
+    "PLR2004", # magic values are the expected values under test
+    "ARG",     # unused fixture args (HA fixture-dependency pattern) / lambda test-double args
+]
+
 [lint.flake8-pytest-style]
 fixture-parentheses = false
 
