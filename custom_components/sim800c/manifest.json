@@ -4,7 +4,7 @@
   "codeowners": ["@samplec0de"],
   "config_flow": true,
   "documentation": "https://github.com/samplec0de/ha-sim800c",
-  "iot_class": "local_push",
+  "iot_class": "local_polling",
   "issue_tracker": "https://github.com/samplec0de/ha-sim800c/issues",
   "requirements": ["pyserial>=3.5"],
   "version": "0.2.0"

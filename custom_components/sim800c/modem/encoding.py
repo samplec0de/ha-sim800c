@@ -2,20 +2,6 @@
 
 from __future__ import annotations
 
-# GSM 03.38 default alphabet (basic set).
-_GSM7_BASIC = (
-    "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ ÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?"
-    "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà"
-)
-# Characters reachable via the GSM 03.38 extension table (ESC prefix).
-_GSM7_EXTENSION = "^{}\\[~]|€\f"
-_GSM7_CHARS = set(_GSM7_BASIC) | set(_GSM7_EXTENSION)
-
-
-def is_gsm7_encodable(text: str) -> bool:
-    """Return True if every character is representable in GSM 03.38."""
-    return all(char in _GSM7_CHARS for char in text)
-
 
 def to_ucs2_hex(text: str) -> str:
     """Encode text as a UCS2 hex string (4 uppercase hex digits per char)."""
@@ -23,7 +9,14 @@ def to_ucs2_hex(text: str) -> str:
 
 
 def choose_encoding(text: str, force_unicode: bool) -> str:  # noqa: FBT001 — public API, matches the send_sms service field
-    """Return 'GSM' or 'UCS2' for the given text."""
-    if force_unicode or not is_gsm7_encodable(text):
+    """
+    Return 'GSM' or 'UCS2' for the given text.
+
+    Only pure-ASCII text is sent as GSM 7-bit (ASCII maps 1:1 to the GSM
+    default alphabet). Any non-ASCII character routes to UCS2, because this
+    module does not implement GSM 03.38 code-point packing and such
+    characters cannot be transmitted correctly in GSM mode.
+    """
+    if force_unicode or not text.isascii():
         return "UCS2"
     return "GSM"

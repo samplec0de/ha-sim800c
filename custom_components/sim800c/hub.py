@@ -20,6 +20,7 @@ class ModemHub:
         self._modem = Modem(self._transport)
         self.signal_dbm: int | None = None
         self.registered: bool = False
+        self._send_lock = asyncio.Lock()
 
     async def async_start(self) -> None:
         """Open the serial connection and initialize the modem."""
@@ -42,8 +43,9 @@ class ModemHub:
         force_unicode: bool,  # noqa: FBT001 -- positional call site fixed by services.py/tests
     ) -> None:
         """Send an SMS to each target, retrying transient failures."""
-        for target in targets:
-            await self._send_one(target, message, force_unicode=force_unicode)
+        async with self._send_lock:
+            for target in targets:
+                await self._send_one(target, message, force_unicode=force_unicode)
 
     async def _send_one(
         self, target: str, message: str, *, force_unicode: bool

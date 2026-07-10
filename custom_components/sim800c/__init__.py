@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from homeassistant.const import CONF_DEVICE
+from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import (
     CONF_BAUD_RATE,
@@ -15,6 +16,7 @@ from .const import (
     SERVICE_SEND_SMS,
 )
 from .hub import ModemHub
+from .modem import ModemError
 from .services import async_register_services
 
 if TYPE_CHECKING:
@@ -28,8 +30,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up SIM800C from a config entry."""
     baud = entry.data.get(CONF_BAUD_RATE, DEFAULT_BAUD_RATE)
     hub = ModemHub(entry.data[CONF_DEVICE], baud)
-    await hub.async_start()
-    await hub.async_update_diagnostics()
+    try:
+        await hub.async_start()
+        await hub.async_update_diagnostics()
+    except (ModemError, OSError) as err:
+        await hub.async_stop()
+        raise ConfigEntryNotReady(str(err)) from err
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = hub
     async_register_services(hass)

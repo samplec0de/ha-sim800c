@@ -11,6 +11,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import SIGNAL_STRENGTH_DECIBELS_MILLIWATT, EntityCategory
+from homeassistant.helpers.entity import DeviceInfo
 
 from .const import DOMAIN
 
@@ -47,6 +48,12 @@ class _BaseSensor(SensorEntity):
         """Bind the sensor to its owning modem hub and config entry."""
         self._hub = hub
         self._entry_id = entry_id
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="SIM800C",
+            manufacturer="SIMCom",
+            model="SIM800C",
+        )
 
     async def async_update(self) -> None:
         """Refresh diagnostic state from the modem hub."""

@@ -1,20 +1,7 @@
 from custom_components.sim800c.modem.encoding import (
     choose_encoding,
-    is_gsm7_encodable,
     to_ucs2_hex,
 )
-
-
-def test_gsm7_detects_plain_ascii():
-    assert is_gsm7_encodable("Hello 123!") is True
-
-
-def test_gsm7_rejects_cyrillic():
-    assert is_gsm7_encodable("Привет") is False
-
-
-def test_gsm7_accepts_extension_chars():
-    assert is_gsm7_encodable("price {50}") is True
 
 
 def test_ucs2_hex_uppercase_four_digits():
@@ -32,3 +19,10 @@ def test_choose_encoding_uses_ucs2_for_cyrillic():
 
 def test_force_unicode_overrides_ascii():
     assert choose_encoding("Hello", force_unicode=True) == "UCS2"
+
+
+def test_choose_encoding_non_ascii_gsm_alphabet_uses_ucs2():
+    # chars in the GSM alphabet but non-ASCII must still go UCS2 (no GSM packing)
+    assert choose_encoding("café", force_unicode=False) == "UCS2"
+    assert choose_encoding("£5 now", force_unicode=False) == "UCS2"
+    assert choose_encoding("€10", force_unicode=False) == "UCS2"
