@@ -36,5 +36,7 @@ async def test_send_sms_service_calls_hub(hass):
         )
 
     hub.async_send_sms.assert_awaited_once_with(
-        ["+79990001122"], "Hello", False
+        ["+79990001122"],
+        "Hello",
+        False,  # noqa: FBT003 — asserts the positional force_unicode arg of the real send_sms signature
     )

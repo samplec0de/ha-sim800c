@@ -7,9 +7,7 @@ from custom_components.sim800c.const import CONF_BAUD_RATE, DOMAIN
 
 
 async def test_user_flow_creates_entry(hass):
-    with patch(
-        "custom_components.sim800c.config_flow.ModemHub"
-    ) as hub_cls:
+    with patch("custom_components.sim800c.config_flow.ModemHub") as hub_cls:
         hub = hub_cls.return_value
         hub.async_start = AsyncMock()
         hub.async_update_diagnostics = AsyncMock()
@@ -29,9 +27,7 @@ async def test_user_flow_creates_entry(hass):
 
 
 async def test_user_flow_errors_when_not_registered(hass):
-    with patch(
-        "custom_components.sim800c.config_flow.ModemHub"
-    ) as hub_cls:
+    with patch("custom_components.sim800c.config_flow.ModemHub") as hub_cls:
         hub = hub_cls.return_value
         hub.async_start = AsyncMock()
         hub.async_update_diagnostics = AsyncMock()

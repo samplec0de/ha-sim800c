@@ -37,7 +37,7 @@ async def test_transaction_serializes_prompt_then_body():
         ('AT\\+CMGS="\\+7', b"\r\n> "),
         ("\x1a", b"\r\n+CMGS: 42\r\n\r\nOK\r\n"),
     ]
-    transport, fake = make_transport(rules)
+    transport, _fake = make_transport(rules)
     await transport.connect()
     async with transport.transaction() as txn:
         await txn.send_line('AT+CMGS="+70000000000"')

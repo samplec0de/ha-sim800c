@@ -1,3 +1,5 @@
+import pytest
+
 from custom_components.sim800c.modem.errors import (
     ModemError,
     ModemTimeout,
@@ -46,13 +48,17 @@ async def test_get_signal_none_when_unknown():
 
 
 async def test_get_registration_true_when_registered():
-    modem, transport, _ = make_modem([("AT\\+CREG\\?", b"\r\n+CREG: 0,1\r\n\r\nOK\r\n")])
+    modem, transport, _ = make_modem(
+        [("AT\\+CREG\\?", b"\r\n+CREG: 0,1\r\n\r\nOK\r\n")]
+    )
     await transport.connect()
     assert await modem.get_registration() is True
 
 
 async def test_get_registration_false_when_searching():
-    modem, transport, _ = make_modem([("AT\\+CREG\\?", b"\r\n+CREG: 0,2\r\n\r\nOK\r\n")])
+    modem, transport, _ = make_modem(
+        [("AT\\+CREG\\?", b"\r\n+CREG: 0,2\r\n\r\nOK\r\n")]
+    )
     await transport.connect()
     assert await modem.get_registration() is False
 
@@ -91,8 +97,6 @@ async def test_send_sms_cyrillic_uses_ucs2():
 
 
 async def test_send_sms_raises_when_not_registered():
-    import pytest
-
     rules = [("AT\\+CREG\\?", b"\r\n+CREG: 0,2\r\n\r\nOK\r\n")]
     modem, transport, _ = make_modem(rules)
     await transport.connect()
@@ -101,8 +105,6 @@ async def test_send_sms_raises_when_not_registered():
 
 
 async def test_send_sms_raises_on_cms_error():
-    import pytest
-
     rules = [
         ("AT\\+CREG\\?", b"\r\n+CREG: 0,1\r\n\r\nOK\r\n"),
         ('AT\\+CSCS="GSM"', b"\r\nOK\r\n"),

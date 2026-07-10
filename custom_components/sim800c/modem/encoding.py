@@ -13,7 +13,7 @@ _GSM7_CHARS = set(_GSM7_BASIC) | set(_GSM7_EXTENSION)
 
 
 def is_gsm7_encodable(text: str) -> bool:
-    """True if every character is representable in GSM 03.38."""
+    """Return True if every character is representable in GSM 03.38."""
     return all(char in _GSM7_CHARS for char in text)
 
 
@@ -22,7 +22,7 @@ def to_ucs2_hex(text: str) -> str:
     return "".join(f"{ord(char):04X}" for char in text)
 
 
-def choose_encoding(text: str, force_unicode: bool) -> str:
+def choose_encoding(text: str, force_unicode: bool) -> str:  # noqa: FBT001 — public API, matches the send_sms service field
     """Return 'GSM' or 'UCS2' for the given text."""
     if force_unicode or not is_gsm7_encodable(text):
         return "UCS2"

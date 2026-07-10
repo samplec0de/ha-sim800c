@@ -5,11 +5,11 @@ class ModemError(Exception):
     """Base error for the modem layer."""
 
 
-class ModemTimeout(ModemError):
+class ModemTimeout(ModemError):  # noqa: N818 — public API name, not renaming
     """No expected token arrived before the timeout."""
 
 
-class NotRegistered(ModemError):
+class NotRegistered(ModemError):  # noqa: N818 — public API name, not renaming
     """The modem is not registered on the network."""
 
 
