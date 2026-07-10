@@ -13,5 +13,8 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
+          # Custom-repository integration: not published to the HA brands
+          # repo, so skip the brands asset check.
+          ignore: brands
       - name: Hassfest validation
         uses: home-assistant/actions/hassfest@master
