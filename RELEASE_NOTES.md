@@ -1,80 +1,58 @@
-# SIM800C Integration v0.2.0 🎉
+# SIM800C Integration v0.3.0 📞
 
-Config-flow setup, a proper `send_sms` service, and a rewritten modem layer that serializes all AT-command traffic through a single hub.
-
-## ⚠️ Breaking Changes
-
-- **The `notify` platform is gone.** Remove any `notify:` block referencing the `sim800c` platform from `configuration.yaml`.
-- **`notify.sms` is replaced by `sim800c.send_sms`.** Update automations/scripts to call the new service (see below).
+Voice calls come to the SIM800C integration: place outgoing calls with automatic hang-up and answer detection, and get notified about incoming calls with caller ID. No audio is played — this is built for **ring alerts / missed-call notifications** and knowing whether a call was answered.
 
 ## ✨ What's New
 
-### Config Flow Setup
-- 🖱️ **UI Setup** - Add the integration from Settings → Devices & Services → Add Integration → SIM800C. No more YAML configuration.
-- ✅ **Validated on Setup** - The config flow connects to the modem and confirms network registration before creating the entry.
-
-### `sim800c.send_sms` Service
-- 📱 Replaces `notify.sms` with fields `target`, `message`, and `force_unicode`.
-- 👥 `target` accepts a single phone number or a list of numbers.
-- 🌍 Messages are automatically encoded as GSM 7-bit or UCS2 based on content; set `force_unicode: true` to force UCS2.
+### `sim800c.call` Service
+- 📞 Places a voice call to `target` and **auto-hangs-up** after `ring_duration` seconds (1–120, default 30).
+- ✅ **Returns whether the call was answered** as a service response (`{"answered": true, "state": "answered"}`). `state` is one of `answered`, `no_answer` (rang out), or `ended` (the remote hung up first).
 
 ```yaml
-service: sim800c.send_sms
+action: sim800c.call
 data:
   target: "+79990001122"
-  message: "Hello from Home Assistant!"
+  ring_duration: 30
+response_variable: call_result
 ```
 
-### Serialized Modem Hub
-- 🔒 All modem access (setup, service calls, diagnostics) is queued through a single hub, so consecutive SMS sends no longer need manual delays between them.
-- 🧾 Token-based AT response parsing removes false error logging seen with the previous substring-based approach.
+### `sim800c.hang_up` Service
+- ☎️ Ends the current call.
 
-### Diagnostic Sensors
-- 📶 `sensor.sim800c_signal` - Signal strength in dBm.
-- 📡 `sensor.sim800c_network` - Network registration state (`registered` or `searching`).
+### Incoming Call Detection
+- 🔔 `binary_sensor.sim800c_incoming_call` — `on` while an incoming call is ringing, with the caller's number in its `caller` attribute (via `+CLIP`).
+- 📣 `sim800c_incoming_call` **event** — fired with `{"caller": "+7..."}` on each incoming call, ready to trigger automations.
+
+```yaml
+automation:
+  - alias: "Announce incoming call"
+    triggers:
+      - trigger: event
+        event_type: sim800c_incoming_call
+    actions:
+      - action: notify.mobile_app
+        data:
+          message: "Incoming call from {{ trigger.event.data.caller }}"
+```
+
+### Live Call State Sensor
+- 🔄 `sensor.sim800c_call_state` — current call state (`idle` / `dialing` / `ringing` / `active` / `incoming`), updated live.
+
+## 🔧 Under the Hood
+- Call progress is tracked via `AT+CLCC`; caller ID is enabled with `AT+CLIP=1`. A background loop polls for incoming calls, serialized with SMS through the existing transport lock so calls and SMS never race on the serial port.
+
+## ⚠️ Notes
+- The integration **does not answer** incoming calls (there is no audio path) — it only reports them.
+- Incoming calls are detected by polling every few seconds, so a very short ring may occasionally be missed.
 
 ## 📦 Installation / Upgrade
 
 ### Via HACS (Recommended)
 1. Update the "SIM800C" integration via HACS.
 2. Restart Home Assistant.
-3. Remove the old `notify:` block for the `sim800c` platform from `configuration.yaml`, if present.
-4. Add the integration via Settings → Devices & Services → Add Integration → SIM800C.
 
 ### Manual
-1. Copy `custom_components/sim800c` to your HA config directory, overwriting the previous version.
+1. Copy `custom_components/sim800c` into your Home Assistant `custom_components` directory, overwriting the previous version.
 2. Restart Home Assistant.
-3. Remove the old `notify:` block for the `sim800c` platform from `configuration.yaml`, if present.
-4. Add the integration via Settings → Devices & Services → Add Integration → SIM800C.
 
-## 🔧 Quick Start
-
-Add the integration via the UI, then send SMS:
-
-```yaml
-service: sim800c.send_sms
-data:
-  target: "+79990001122"
-  message: "Hello from Home Assistant! 🎉"
-```
-
-## 🐛 Known Issues & Limitations
-
-- SMS only (no voice call support).
-- Requires serial device access permissions (see [README.md](README.md)).
-- Phone number must be in international format (`+7...`).
-
-## 📖 Documentation
-
-Full documentation available in [README.md](README.md).
-
-## 🙏 Acknowledgments
-
-- Based on [integration_blueprint](https://github.com/ludeeus/integration_blueprint) by @ludeeus
-- Inspired by [homeassistant-gsm-call](https://github.com/black-roland/homeassistant-gsm-call)
-
----
-
-**Enjoy the rebuilt SIM800C integration!** 📨
-
-If you encounter any issues, please [open an issue](https://github.com/samplec0de/ha-sim800c/issues).
+**Full changelog:** see [CHANGELOG.md](CHANGELOG.md).
