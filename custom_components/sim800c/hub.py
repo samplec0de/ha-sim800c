@@ -41,6 +41,12 @@ _SMS_POLL_EVERY = 3
 _CALL_POLL_INTERVAL = 1.0
 # Default seconds to let an outgoing call ring before auto-hanging-up.
 DEFAULT_RING_DURATION = 30.0
+# Default playback volume (0-100) for call_and_play.
+DEFAULT_PLAY_VOLUME = 90
+# Grace seconds added after a known clip length before hanging up.
+_PLAYBACK_TAIL = 2.0
+# Hard cap on how long we wait for playback when the clip length is unknown.
+_PLAYBACK_MAX = 60.0
 
 
 @dataclass(frozen=True)
@@ -51,6 +57,8 @@ class CallResult:
     """True if the other party picked up before we hung up."""
     final_state: str
     """One of 'answered', 'no_answer' (rang out), or 'ended' (remote hung up)."""
+    played: bool = False
+    """True if the audio clip was played into the answered call."""
 
 
 class ModemHub:
@@ -153,6 +161,89 @@ class ModemHub:
                 final_state = "no_answer"
             LOGGER.info("Call to %s finished: %s", target, final_state)
             return CallResult(answered=answered, final_state=final_state)
+
+    async def async_call_and_play(
+        self,
+        target: str,
+        audio: bytes,
+        duration: float | None = None,
+        ring_duration: float = DEFAULT_RING_DURATION,
+        volume: int = DEFAULT_PLAY_VOLUME,
+    ) -> CallResult:
+        """
+        Place a call and play an AMR-NB clip into it so the callee hears it.
+
+        Uploads `audio` to the modem, dials `target`, and — once the other party
+        answers — plays the clip into the call's uplink. If `duration` (the known
+        clip length in seconds) is given, the call is held that long plus a short
+        tail; otherwise playback is watched until the call drops or a 60s cap is
+        reached. The call is always auto-hung-up. Returns whether it was answered
+        and whether the clip was played.
+        """
+        async with self._call_lock:
+            # Upload before dialing so the file is ready the moment we connect.
+            await self._modem.upload_audio(audio)
+            await self._modem.dial(target)
+            LOGGER.info(
+                "Calling %s to play audio (ring up to %ss)", target, ring_duration
+            )
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + ring_duration
+            answered = False
+            played = False
+            saw_call = False
+            remote_ended = False
+
+            while loop.time() < deadline:
+                await asyncio.sleep(_CALL_POLL_INTERVAL)
+                call = await self._refresh_call_state()
+                if call is None:
+                    if saw_call:
+                        remote_ended = True
+                        break
+                    continue
+                saw_call = True
+                if call.is_answered:
+                    answered = True
+                    break
+
+            if answered:
+                LOGGER.info("Call to %s answered; playing audio", target)
+                await self._modem.play_audio(volume)
+                played = True
+                await self._await_playback(duration)
+                await self._modem.stop_audio()
+
+            await self._safe_hangup()
+            async with self._state_lock:
+                self._apply_call(None)
+
+            if answered:
+                final_state = "answered"
+            elif remote_ended:
+                final_state = "ended"
+            else:
+                final_state = "no_answer"
+            LOGGER.info(
+                "Call-and-play to %s finished: %s (played=%s)",
+                target,
+                final_state,
+                played,
+            )
+            return CallResult(answered=answered, final_state=final_state, played=played)
+
+    async def _await_playback(self, duration: float | None) -> None:
+        """Hold the call while the clip plays, then return."""
+        if duration is not None:
+            await asyncio.sleep(duration + _PLAYBACK_TAIL)
+            return
+        # Unknown clip length: poll until the call drops or the hard cap hits.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _PLAYBACK_MAX
+        while loop.time() < deadline:
+            await asyncio.sleep(_CALL_POLL_INTERVAL)
+            if await self._refresh_call_state() is None:
+                return
 
     async def async_hang_up(self) -> None:
         """Hang up the current call, if any."""

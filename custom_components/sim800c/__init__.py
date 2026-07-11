@@ -21,6 +21,7 @@ from .const import (
     LOGGER,
     PLATFORMS,
     SERVICE_CALL,
+    SERVICE_CALL_AND_PLAY,
     SERVICE_HANG_UP,
     SERVICE_SEND_SMS,
     SIGNAL_UPDATE,
@@ -35,9 +36,14 @@ if TYPE_CHECKING:
 
     from .modem import SmsMessage
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
-_SERVICES = (SERVICE_SEND_SMS, SERVICE_CALL, SERVICE_HANG_UP)
+_SERVICES = (
+    SERVICE_SEND_SMS,
+    SERVICE_CALL,
+    SERVICE_CALL_AND_PLAY,
+    SERVICE_HANG_UP,
+)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

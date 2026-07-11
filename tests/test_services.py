@@ -93,6 +93,7 @@ async def test_unload_entry_stops_hub_and_removes_service(hass):
 
         assert hass.services.has_service(DOMAIN, "send_sms")
         assert hass.services.has_service(DOMAIN, "call")
+        assert hass.services.has_service(DOMAIN, "call_and_play")
         assert hass.services.has_service(DOMAIN, "hang_up")
 
         assert await hass.config_entries.async_unload(entry.entry_id)
@@ -101,6 +102,7 @@ async def test_unload_entry_stops_hub_and_removes_service(hass):
         hub.async_stop.assert_awaited_once()
         assert not hass.services.has_service(DOMAIN, "send_sms")
         assert not hass.services.has_service(DOMAIN, "call")
+        assert not hass.services.has_service(DOMAIN, "call_and_play")
         assert not hass.services.has_service(DOMAIN, "hang_up")
 
 
@@ -121,6 +123,9 @@ async def _setup_with_mock_hub(hass) -> tuple:
     hub.async_hang_up = AsyncMock()
     hub.async_call = AsyncMock(
         return_value=CallResult(answered=True, final_state="answered")
+    )
+    hub.async_call_and_play = AsyncMock(
+        return_value=CallResult(answered=True, final_state="answered", played=True)
     )
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -174,6 +179,74 @@ async def test_call_service_wraps_modem_error(hass):
         with pytest.raises(HomeAssistantError):
             await hass.services.async_call(
                 DOMAIN, "call", {"target": "+79990001122"}, blocking=True
+            )
+    finally:
+        patcher.stop()
+
+
+async def test_call_and_play_service_reads_file_and_calls_hub(hass, tmp_path):
+    audio_path = tmp_path / "alert.amr"
+    audio_path.write_bytes(b"AMRDATA")
+    hub, patcher = await _setup_with_mock_hub(hass)
+    try:
+        with patch.object(hass.config, "is_allowed_path", return_value=True):
+            response = await hass.services.async_call(
+                DOMAIN,
+                "call_and_play",
+                {
+                    "target": "+79990001122",
+                    "audio_file": str(audio_path),
+                    "duration": 3,
+                    "volume": 80,
+                },
+                blocking=True,
+                return_response=True,
+            )
+    finally:
+        patcher.stop()
+
+    hub.async_call_and_play.assert_awaited_once_with(
+        "+79990001122", b"AMRDATA", duration=3.0, volume=80
+    )
+    assert response == {"answered": True, "played": True}
+
+
+async def test_call_and_play_service_rejects_disallowed_path(hass, tmp_path):
+    audio_path = tmp_path / "alert.amr"
+    audio_path.write_bytes(b"AMRDATA")
+    hub, patcher = await _setup_with_mock_hub(hass)
+    try:
+        with (
+            patch.object(hass.config, "is_allowed_path", return_value=False),
+            pytest.raises(HomeAssistantError),
+        ):
+            await hass.services.async_call(
+                DOMAIN,
+                "call_and_play",
+                {"target": "+79990001122", "audio_file": str(audio_path)},
+                blocking=True,
+            )
+    finally:
+        patcher.stop()
+
+    hub.async_call_and_play.assert_not_awaited()
+
+
+async def test_call_and_play_service_wraps_modem_error(hass, tmp_path):
+    audio_path = tmp_path / "alert.amr"
+    audio_path.write_bytes(b"AMRDATA")
+    hub, patcher = await _setup_with_mock_hub(hass)
+    hub.async_call_and_play = AsyncMock(side_effect=ModemError("boom"))
+    try:
+        with (
+            patch.object(hass.config, "is_allowed_path", return_value=True),
+            pytest.raises(HomeAssistantError),
+        ):
+            await hass.services.async_call(
+                DOMAIN,
+                "call_and_play",
+                {"target": "+79990001122", "audio_file": str(audio_path)},
+                blocking=True,
             )
     finally:
         patcher.stop()

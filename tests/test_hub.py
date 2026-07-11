@@ -37,10 +37,32 @@ class FakeModem:
         self.dialed: str | None = None
         self.hung_up = False
         self.deleted: list[int] = []
+        self.uploaded: bytes | None = None
+        self.played = False
+        self.play_volume: int | None = None
+        self.stopped = False
+        self.order: list[str] = []
 
     async def dial(self, number: str) -> None:
         """Record the dialed number."""
         self.dialed = number
+        self.order.append("dial")
+
+    async def upload_audio(self, data: bytes) -> None:
+        """Record the uploaded audio payload."""
+        self.uploaded = data
+        self.order.append("upload")
+
+    async def play_audio(self, volume: int = 90) -> None:
+        """Record that playback started at the given volume."""
+        self.played = True
+        self.play_volume = volume
+        self.order.append("play")
+
+    async def stop_audio(self) -> None:
+        """Record that playback was stopped."""
+        self.stopped = True
+        self.order.append("stop")
 
     async def hangup(self) -> None:
         """Record that a hang-up was requested."""
@@ -113,6 +135,72 @@ async def test_async_call_reports_remote_ended():
     result = await hub.async_call("+79990001122", ring_duration=5)
     assert result.answered is False
     assert result.final_state == "ended"
+
+
+async def test_call_and_play_uploads_dials_then_plays_when_answered():
+    hub = make_hub()
+    # Ring, answer, then the call drops so unknown-duration playback returns fast.
+    hub._modem = FakeModem(  # noqa: SLF001
+        [
+            CallInfo(CALL_DIR_OUTGOING, CALL_STAT_ALERTING, "+79990001122"),
+            CallInfo(CALL_DIR_OUTGOING, CALL_STAT_ACTIVE, "+79990001122"),
+            None,
+        ]
+    )
+    result = await hub.async_call_and_play("+79990001122", b"AMRDATA", ring_duration=5)
+    modem = hub._modem  # noqa: SLF001
+    assert modem.uploaded == b"AMRDATA"
+    assert modem.dialed == "+79990001122"
+    # Upload must happen before dialing so the file is ready on connect.
+    assert modem.order[:2] == ["upload", "dial"]
+    assert modem.played is True
+    assert modem.play_volume == 90
+    assert modem.stopped is True
+    assert modem.hung_up is True
+    assert result.answered is True
+    assert result.played is True
+    assert result.final_state == "answered"
+    assert hub.call_state == CALL_STATE_IDLE
+
+
+async def test_call_and_play_does_not_play_when_unanswered():
+    hub = make_hub()
+    # Rings the whole time, never answered.
+    hub._modem = FakeModem(  # noqa: SLF001
+        [CallInfo(CALL_DIR_OUTGOING, CALL_STAT_ALERTING, "+79990001122")]
+    )
+    result = await hub.async_call_and_play(
+        "+79990001122", b"AMRDATA", ring_duration=0.05
+    )
+    modem = hub._modem  # noqa: SLF001
+    # Still uploaded up-front, but never played into a call that didn't connect.
+    assert modem.uploaded == b"AMRDATA"
+    assert "play" not in modem.order
+    assert modem.played is False
+    assert modem.stopped is False
+    assert modem.hung_up is True
+    assert result.answered is False
+    assert result.played is False
+    assert result.final_state == "no_answer"
+
+
+async def test_call_and_play_honors_duration_and_volume(monkeypatch):
+    # Drop the post-clip grace so the duration branch runs instantly.
+    monkeypatch.setattr(hub_mod, "_PLAYBACK_TAIL", 0.0)
+    hub = make_hub()
+    hub._modem = FakeModem(  # noqa: SLF001
+        [
+            CallInfo(CALL_DIR_OUTGOING, CALL_STAT_ALERTING, "+79990001122"),
+            CallInfo(CALL_DIR_OUTGOING, CALL_STAT_ACTIVE, "+79990001122"),
+        ]
+    )
+    result = await hub.async_call_and_play(
+        "+79990001122", b"AMRDATA", duration=0.0, ring_duration=5, volume=45
+    )
+    modem = hub._modem  # noqa: SLF001
+    assert result.played is True
+    assert modem.play_volume == 45
+    assert modem.stopped is True
 
 
 async def test_incoming_call_sets_state_and_fires_event_once():

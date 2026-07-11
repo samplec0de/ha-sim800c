@@ -9,6 +9,7 @@ Supports **SMS** (send and receive) and **voice calls** (ring alerts / missed-ca
 - Send SMS messages via the `sim800c.send_sms` service
 - Receive SMS: `sensor.sim800c_last_sms` and the `sim800c_incoming_sms` event, with automatic GSM/UCS2 decoding
 - Place voice calls via the `sim800c.call` service, with automatic hang-up and answered/no-answer reporting (no audio is played)
+- Play a pre-made **AMR-NB** audio clip into a call via the `sim800c.call_and_play` service, so the callee hears it, with automatic hang-up
 - Hang up an active call via the `sim800c.hang_up` service
 - Detect incoming calls via `binary_sensor.sim800c_incoming_call` (with caller number) and the `sim800c_incoming_call` event
 - Live call state via `sensor.sim800c_call_state` (`idle` / `dialing` / `ringing` / `active` / `incoming`)
@@ -204,6 +205,60 @@ The service **returns a response** indicating whether the call was answered:
 ```
 
 `call_result` looks like `{"answered": true, "state": "answered"}`. `state` is one of `answered`, `no_answer` (rang out and auto-hung-up), or `ended` (the remote hung up / rejected before answering).
+
+### Playing Audio Into a Call
+
+Unlike `sim800c.call`, the `sim800c.call_and_play` service plays a pre-made audio clip **into the call**, so the person you call actually **hears it**. The clip is uploaded to the modem, dialed out, and played into the call's uplink once the other party answers; then the call is hung up automatically.
+
+```yaml
+service: sim800c.call_and_play
+data:
+  target: "+79990001122"
+  audio_file: "/media/sim800c/alert.amr"
+  duration: 5          # optional, known clip length in seconds
+  ring_duration: 30    # optional, seconds to ring before giving up (1–120)
+  volume: 90           # optional, 0–100 (default 90)
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `target` | Yes | Phone number in international format (`+7...`). |
+| `audio_file` | Yes | Path to a local **AMR-NB** file readable by Home Assistant. Must be under an [allowlisted directory](https://www.home-assistant.io/integrations/homeassistant/#allowlist_external_dirs) (e.g. `/media`). |
+| `duration` | No | Known clip length in seconds, used to hold the call while it plays. If omitted, playback is watched until the call drops or a 60s cap is reached. |
+| `ring_duration` | No | Seconds to let the call ring before giving up (1–120, default `30`). The clip is only played if the call is answered within this window. |
+| `volume` | No | Playback volume, `0`–`100` (default `90`). |
+
+The service **returns a response** `{"answered": <bool>, "played": <bool>}` — `played` is `true` only if the call was answered and the clip was streamed into it.
+
+> **Audio must be AMR-NB (8 kHz, mono).** This is the format the SIM800C plays natively. You can generate speech with any TTS engine and convert the result, e.g. with `ffmpeg` built with an opencore-amr encoder:
+>
+> ```bash
+> ffmpeg -i input.wav -ar 8000 -ac 1 -c:a libopencore_amrnb -b:a 12.2k alert.amr
+> ```
+
+Example automation — a spoken voice-call alert, falling back to SMS if unanswered:
+
+```yaml
+automation:
+  - alias: "Voice-call alert on a water leak"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.water_leak
+        to: "on"
+    actions:
+      - action: sim800c.call_and_play
+        data:
+          target: "+79990001122"
+          audio_file: "/media/sim800c/alert.amr"
+          duration: 5
+        response_variable: result
+      - if: "{{ not result.answered }}"
+        then:
+          - action: sim800c.send_sms
+            data:
+              target: "+79990001122"
+              message: "⚠️ Water leak detected at home! (call went unanswered)"
+```
 
 ### Hanging Up
 

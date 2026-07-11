@@ -1,22 +1,49 @@
-# SIM800C Integration v0.5.0 ☎️
+# SIM800C Integration v0.6.0 🔊
 
-Adds a persistent **last caller** sensor.
+Play a pre-made audio clip **into a voice call** so the person you call hears it.
 
 ## ✨ What's New
 
-- 📇 **`sensor.sim800c_last_caller`** — the number of the most recent incoming caller, kept even after the call ends. Unlike `binary_sensor.sim800c_incoming_call`'s `caller` attribute (which clears when the phone stops ringing), this survives, so a missed call's number stays available for automations and dashboards. Mirrors the existing `sensor.sim800c_last_sms`.
+- 🔊 **`sim800c.call_and_play`** — place a call and play an **AMR-NB** audio clip into it, so the **callee hears your message**, then hang up automatically. Perfect for spoken alerts ("Water leak detected at home") to a phone that has no smart-home app.
 
 ```yaml
 automation:
-  - alias: "Notify me about the last caller"
+  - alias: "Voice-call alert on a water leak"
     triggers:
       - trigger: state
-        entity_id: sensor.sim800c_last_caller
+        entity_id: binary_sensor.water_leak
+        to: "on"
     actions:
-      - action: notify.mobile_app_phone
+      - action: sim800c.call_and_play
         data:
-          message: "Last call from {{ states('sensor.sim800c_last_caller') }}"
+          target: "+79990001122"
+          audio_file: "/media/sim800c/alert.amr"
+          duration: 5          # optional: known clip length in seconds
+          ring_duration: 30     # optional: seconds to ring before giving up
+          volume: 90            # optional: 0-100
+        response_variable: result
+      - if: "{{ not result.answered }}"
+        then:
+          - action: sim800c.send_sms
+            data:
+              target: "+79990001122"
+              message: "⚠️ Water leak at home (call went unanswered)."
 ```
+
+The service returns `{"answered": <bool>, "played": <bool>}`.
+
+## 🎧 Audio format
+
+The clip **must be AMR-NB (8 kHz, mono)** — the format the SIM800C plays natively.
+Convert an existing WAV/MP3 with `ffmpeg` (built with an opencore-amr encoder):
+
+```bash
+ffmpeg -i input.wav -ar 8000 -ac 1 -c:a libopencore_amrnb -b:a 12.2k alert.amr
+```
+
+You can generate the source audio with any TTS engine first, then convert it.
+Place the resulting `.amr` under a Home Assistant allowlisted directory (e.g.
+`/media/`) so the service can read it.
 
 ## 📦 Installation / Upgrade
 
