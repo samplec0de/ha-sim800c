@@ -287,6 +287,82 @@ async def test_delete_sms_sends_cmgd():
     assert b"AT+CMGD=4\r\n" in b"".join(fake.written)
 
 
+async def test_upload_audio_creates_and_writes_single_chunk():
+    rules = [
+        ("AT\\+FSDEL", b"\r\nERROR\r\n"),  # file absent — ignored
+        ("AT\\+FSCREATE", b"\r\nOK\r\n"),
+        ("AT\\+FSWRITE", b"\r\n> "),
+        ("HELLO", b"\r\nOK\r\n"),  # the raw chunk payload → OK
+    ]
+    modem, transport, fake = make_modem(rules)
+    await transport.connect()
+    await modem.upload_audio(b"HELLODATA")
+    joined = b"".join(fake.written)
+    # FSCREATE precedes the write, on the proven backslash path.
+    assert b"AT+FSCREATE=C:\\User\\ha_play.amr\r\n" in joined
+    # Append mode (,1,) with the chunk length and input timeout.
+    assert b"AT+FSWRITE=C:\\User\\ha_play.amr,1,9,30\r\n" in joined
+    # Raw payload written verbatim after the ">" prompt.
+    assert b"HELLODATA" in joined
+
+
+async def test_upload_audio_chunks_at_4096():
+    rules = [
+        ("AT\\+FSDEL", b"\r\nOK\r\n"),
+        ("AT\\+FSCREATE", b"\r\nOK\r\n"),
+        ("AT\\+FSWRITE", b"\r\n> "),
+        ("AAAA", b"\r\nOK\r\n"),  # each raw chunk → OK
+    ]
+    modem, transport, fake = make_modem(rules)
+    await transport.connect()
+    await modem.upload_audio(b"A" * 5000)
+    joined = b"".join(fake.written)
+    # 5000 bytes -> a full 4096 chunk plus a 904-byte remainder.
+    assert b"AT+FSWRITE=C:\\User\\ha_play.amr,1,4096,30\r\n" in joined
+    assert b"AT+FSWRITE=C:\\User\\ha_play.amr,1,904,30\r\n" in joined
+
+
+async def test_upload_audio_raises_without_prompt():
+    rules = [
+        ("AT\\+FSDEL", b"\r\nOK\r\n"),
+        ("AT\\+FSCREATE", b"\r\nOK\r\n"),
+        # FSWRITE never emits the ">" prompt -> read times out.
+        ("AT\\+FSWRITE", b"\r\nOK\r\n"),
+    ]
+    modem, transport, _ = make_modem(rules)
+    await transport.connect()
+    with pytest.raises(ModemError):
+        await modem.upload_audio(b"DATA")
+
+
+async def test_play_audio_sends_crec_into_call():
+    modem, transport, fake = make_modem([("AT\\+CREC=4", b"\r\nOK\r\n")])
+    await transport.connect()
+    await modem.play_audio(90)
+    assert b'AT+CREC=4,"C:\\User\\ha_play.amr",0,90\r\n' in b"".join(fake.written)
+
+
+async def test_play_audio_custom_volume():
+    modem, transport, fake = make_modem([("AT\\+CREC=4", b"\r\nOK\r\n")])
+    await transport.connect()
+    await modem.play_audio(45)
+    assert b'AT+CREC=4,"C:\\User\\ha_play.amr",0,45\r\n' in b"".join(fake.written)
+
+
+async def test_stop_audio_sends_crec_5():
+    modem, transport, fake = make_modem([("AT\\+CREC=5", b"\r\nOK\r\n")])
+    await transport.connect()
+    await modem.stop_audio()
+    assert b"AT+CREC=5\r\n" in b"".join(fake.written)
+
+
+async def test_stop_audio_tolerates_error():
+    # AT+CREC=5 errors when nothing is playing; stop_audio must not raise.
+    modem, transport, _ = make_modem([("AT\\+CREC=5", b"\r\n+CME ERROR: 3\r\n")])
+    await transport.connect()
+    await modem.stop_audio()  # must not raise
+
+
 async def test_initialize_enables_csdh():
     modem, transport, fake = make_modem(
         [

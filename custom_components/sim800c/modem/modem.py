@@ -38,6 +38,21 @@ _CLCC_RE = re.compile(
     r'\+CLCC:\s*\d+,(\d+),(\d+),\d+,\d+(?:,"([^"]*)")?',
 )
 
+# Audio playback into a voice call (proven on SIM800 R14.18 firmware).
+# The AMR-NB file is uploaded to the modem's flash, then streamed into the
+# active call's uplink so the *remote* party hears it.
+_PLAY_PATH = "C:\\User\\ha_play.amr"
+# Max bytes per AT+FSWRITE chunk accepted by this firmware.
+_AUDIO_CHUNK_SIZE = 4096
+# AT+FSWRITE mode: 1 = append (mode 0 is rejected by this firmware).
+_FSWRITE_MODE_APPEND = 1
+# AT+FSWRITE input-timeout argument (seconds the modem waits for the payload).
+_FSWRITE_INPUT_TIMEOUT = 30
+# AT+CREC output channel: 0 = into the call uplink (the remote hears it).
+_CREC_CHANNEL_CALL = 0
+# Default playback volume (0-100) for AT+CREC.
+_CREC_DEFAULT_VOLUME = 90
+
 # +CLCC <dir> field (3GPP TS 27.007)
 CALL_DIR_OUTGOING = 0  # mobile-originated
 CALL_DIR_INCOMING = 1  # mobile-terminated
@@ -202,6 +217,41 @@ class Modem:
     async def delete_sms(self, index: int) -> None:
         """Delete the message stored at `index` (AT+CMGD)."""
         await self._transport.execute(f"AT+CMGD={index}")
+
+    async def upload_audio(self, data: bytes) -> None:
+        """
+        Upload an AMR-NB clip to the modem's flash for later playback.
+
+        Overwrites any previously uploaded clip, then writes `data` in
+        <=4096-byte chunks via chunked AT+FSWRITE (append mode). The file must
+        exist (AT+FSCREATE) before it can be written to.
+        """
+        # Remove any previous file; ignore ERROR when it does not yet exist.
+        with contextlib.suppress(ModemError):
+            await self._transport.execute(f"AT+FSDEL={_PLAY_PATH}")
+        await self._transport.execute(f"AT+FSCREATE={_PLAY_PATH}")
+
+        async with self._transport.transaction() as txn:
+            for start in range(0, len(data), _AUDIO_CHUNK_SIZE):
+                chunk = data[start : start + _AUDIO_CHUNK_SIZE]
+                await txn.send_line(
+                    f"AT+FSWRITE={_PLAY_PATH},{_FSWRITE_MODE_APPEND},"
+                    f"{len(chunk)},{_FSWRITE_INPUT_TIMEOUT}"
+                )
+                await txn.read_until((">",), timeout=5.0)
+                await txn.write_raw(chunk)
+                await txn.read_until(("OK",), timeout=10.0)
+
+    async def play_audio(self, volume: int = _CREC_DEFAULT_VOLUME) -> None:
+        """Play the uploaded clip into the active call (AT+CREC=4)."""
+        await self._transport.execute(
+            f'AT+CREC=4,"{_PLAY_PATH}",{_CREC_CHANNEL_CALL},{volume}'
+        )
+
+    async def stop_audio(self) -> None:
+        """Stop any in-progress playback (AT+CREC=5); best-effort."""
+        with contextlib.suppress(ModemError):
+            await self._transport.execute("AT+CREC=5")
 
 
 def _parse_cmgl(resp: str) -> list[SmsMessage]:

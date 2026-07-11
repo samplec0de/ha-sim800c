@@ -50,6 +50,32 @@
         }
       }
     },
+    "call_and_play": {
+      "name": "Call and play audio",
+      "description": "Place a voice call and play a pre-made AMR-NB audio clip into it so the callee hears it, then automatically hang up. The audio file must be AMR-NB (8 kHz mono).",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "Phone number in international format (+7...)."
+        },
+        "audio_file": {
+          "name": "Audio file",
+          "description": "Path to a local AMR-NB file readable by Home Assistant (must be under an allowlisted directory)."
+        },
+        "duration": {
+          "name": "Clip duration",
+          "description": "Known length of the clip in seconds, used to hold the call while it plays. If omitted, playback is watched until the call drops or a 60s cap."
+        },
+        "ring_duration": {
+          "name": "Ring duration",
+          "description": "Seconds to let the call ring before giving up (1-120). The clip is only played if the call is answered within this window."
+        },
+        "volume": {
+          "name": "Volume",
+          "description": "Playback volume (0-100)."
+        }
+      }
+    },
     "hang_up": {
       "name": "Hang up",
       "description": "Hang up the current call, if any."

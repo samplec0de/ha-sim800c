@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-07-11
+
+### Added
+- `sim800c.call_and_play` service: place a voice call and play a pre-made **AMR-NB** audio clip into it so the **callee hears it**, then automatically hang up. The clip is uploaded to the modem, dialed out, and played into the call's uplink once the other party answers; the call is watched and auto-hung-up (using the optional `duration` clip length, or a 60s cap when unknown). Returns `{"answered": bool, "played": bool}`. Fields: `target`, `audio_file` (path to a local AMR-NB file under an allowlisted directory), optional `duration`, `ring_duration` (1–120s), and `volume` (0–100, default 90).
+- Modem layer: `Modem.upload_audio()` (chunked `AT+FSCREATE`/`AT+FSWRITE`), `Modem.play_audio()` (`AT+CREC=4`), and `Modem.stop_audio()` (`AT+CREC=5`).
+
+### Notes
+- `call_and_play` requires an **AMR-NB (8 kHz mono)** file. Plain speech can be produced with any TTS engine and then converted to AMR-NB (e.g. with `ffmpeg` + an opencore-amr encoder). The other call services (`sim800c.call`, `sim800c.hang_up`) still play no audio.
+
 ## [0.5.0] - 2026-07-11
 
 ### Added
