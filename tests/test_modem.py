@@ -216,3 +216,86 @@ async def test_get_current_call_incoming_without_number():
     assert call is not None
     assert call.is_incoming
     assert call.number is None
+
+
+async def test_list_unread_sms_none_returns_empty():
+    modem, transport, _ = make_modem([('AT\\+CMGL="REC UNREAD"', b"\r\nOK\r\n")])
+    await transport.connect()
+    assert await modem.list_unread_sms() == []
+
+
+async def test_list_unread_sms_gsm_ascii():
+    resp = (
+        b'\r\n+CMGL: 1,"REC UNREAD","+79990001122","","24/07/11,02:30:00+12",'
+        b"145,4,0,0,,145,5\r\nHello\r\n\r\nOK\r\n"
+    )
+    modem, transport, _ = make_modem([('AT\\+CMGL="REC UNREAD"', resp)])
+    await transport.connect()
+    msgs = await modem.list_unread_sms()
+    assert len(msgs) == 1
+    assert msgs[0].index == 1
+    assert msgs[0].sender == "+79990001122"
+    assert msgs[0].timestamp == "24/07/11,02:30:00+12"
+    assert msgs[0].text == "Hello"
+
+
+async def test_list_unread_sms_ucs2_cyrillic_body_decoded():
+    # DCS=8 (UCS2); body is UCS2 hex for "Привет".
+    resp = (
+        b'\r\n+CMGL: 2,"REC UNREAD","+79990001122","","24/07/11,02:31:00+12",'
+        b"145,4,0,8,,145,12\r\n041F04400438043204350442\r\n\r\nOK\r\n"
+    )
+    modem, transport, _ = make_modem([('AT\\+CMGL="REC UNREAD"', resp)])
+    await transport.connect()
+    msgs = await modem.list_unread_sms()
+    assert len(msgs) == 1
+    assert msgs[0].text == "Привет"
+
+
+async def test_list_unread_sms_without_csdh_dcs_absent_treated_as_text():
+    # CSDH=0 header (no DCS): body used verbatim.
+    resp = (
+        b'\r\n+CMGL: 3,"REC UNREAD","+79990001122","",'
+        b'"24/07/11,02:32:00+12"\r\nPlain text\r\n\r\nOK\r\n'
+    )
+    modem, transport, _ = make_modem([('AT\\+CMGL="REC UNREAD"', resp)])
+    await transport.connect()
+    msgs = await modem.list_unread_sms()
+    assert len(msgs) == 1
+    assert msgs[0].text == "Plain text"
+
+
+async def test_list_unread_sms_multiple_messages():
+    resp = (
+        b'\r\n+CMGL: 1,"REC UNREAD","+79990001122","","24/07/11,02:30:00+12",'
+        b"145,4,0,0,,145,3\r\nOne\r\n"
+        b'+CMGL: 2,"REC UNREAD","+79990003344","","24/07/11,02:31:00+12",'
+        b"145,4,0,0,,145,3\r\nTwo\r\n\r\nOK\r\n"
+    )
+    modem, transport, _ = make_modem([('AT\\+CMGL="REC UNREAD"', resp)])
+    await transport.connect()
+    msgs = await modem.list_unread_sms()
+    assert [m.index for m in msgs] == [1, 2]
+    assert [m.sender for m in msgs] == ["+79990001122", "+79990003344"]
+    assert [m.text for m in msgs] == ["One", "Two"]
+
+
+async def test_delete_sms_sends_cmgd():
+    modem, transport, fake = make_modem([("AT\\+CMGD=4", b"\r\nOK\r\n")])
+    await transport.connect()
+    await modem.delete_sms(4)
+    assert b"AT+CMGD=4\r\n" in b"".join(fake.written)
+
+
+async def test_initialize_enables_csdh():
+    modem, transport, fake = make_modem(
+        [
+            ("ATE0", b"\r\nOK\r\n"),
+            ("AT\\+CMGF=1", b"\r\nOK\r\n"),
+            ("AT\\+CLIP=1", b"\r\nOK\r\n"),
+            ("AT\\+CSDH=1", b"\r\nOK\r\n"),
+        ]
+    )
+    await transport.connect()
+    await modem.initialize()
+    assert b"AT+CSDH=1\r\n" in b"".join(fake.written)

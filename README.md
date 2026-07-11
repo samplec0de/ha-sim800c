@@ -2,11 +2,12 @@
 
 Home Assistant integration for SIM800C GSM module connected via USB/Serial.
 
-Supports **SMS notifications** and **voice calls** (ring alerts / missed-call notifications).
+Supports **SMS** (send and receive) and **voice calls** (ring alerts / missed-call notifications).
 
 ## Features
 
 - Send SMS messages via the `sim800c.send_sms` service
+- Receive SMS: `sensor.sim800c_last_sms` and the `sim800c_incoming_sms` event, with automatic GSM/UCS2 decoding
 - Place voice calls via the `sim800c.call` service, with automatic hang-up and answered/no-answer reporting (no audio is played)
 - Hang up an active call via the `sim800c.hang_up` service
 - Detect incoming calls via `binary_sensor.sim800c_incoming_call` (with caller number) and the `sim800c_incoming_call` event
@@ -119,6 +120,53 @@ data:
 ```
 
 Set `force_unicode: true` if you need to force UCS2 encoding for a message that would otherwise be sent as GSM 7-bit.
+
+## Receiving SMS
+
+The integration watches the modem for received messages in the background. When an SMS arrives, two things happen:
+
+- `sensor.sim800c_last_sms` updates to the message text. Its attributes hold the full `text`, the `sender`, and the `timestamp`.
+- A `sim800c_incoming_sms` **event** fires with `{"sender": "...", "text": "...", "timestamp": "..."}`.
+
+Both GSM 7-bit and Unicode (UCS2 — Cyrillic, emoji, etc.) message bodies are decoded automatically.
+
+Example automation reacting to a received SMS:
+
+```yaml
+automation:
+  - alias: "Forward incoming SMS to my phone"
+    triggers:
+      - trigger: event
+        event_type: sim800c_incoming_sms
+    actions:
+      - action: notify.mobile_app_phone
+        data:
+          title: "📩 SMS from {{ trigger.event.data.sender }}"
+          message: "{{ trigger.event.data.text }}"
+```
+
+Act only on messages from a specific sender (e.g. a gate/alarm unit):
+
+```yaml
+automation:
+  - alias: "Balance alert"
+    triggers:
+      - trigger: event
+        event_type: sim800c_incoming_sms
+    conditions:
+      - condition: template
+        value_template: "{{ 'balance' in trigger.event.data.text | lower }}"
+    actions:
+      - action: persistent_notification.create
+        data:
+          title: "SIM balance"
+          message: "{{ trigger.event.data.text }}"
+```
+
+> **Notes:**
+> - After a message is read and its event fires, it is **deleted from the modem** to avoid duplicate events and to keep the SIM's limited storage from filling up.
+> - Received SMS are detected by polling every few seconds (not instantly).
+> - Long (multi-part) messages are reported as **separate events**, one per part — the integration does not reassemble concatenated SMS.
 
 ## Voice Calls
 
@@ -337,9 +385,10 @@ The integration exposes two diagnostic sensors per configured modem:
 - `sensor.sim800c_signal` — signal strength in dBm.
 - `sensor.sim800c_network` — network registration state (`registered` or `searching`).
 - `sensor.sim800c_call_state` — current call state (`idle` / `dialing` / `ringing` / `active` / `incoming`), updated live.
+- `sensor.sim800c_last_sms` — text of the most recently received SMS, with `sender`, `text`, and `timestamp` attributes.
 - `binary_sensor.sim800c_incoming_call` — `on` while an incoming call is ringing, with the caller number in its `caller` attribute.
 
-The signal and network sensors are polled periodically; the call-state and incoming-call sensors update as calls come and go. All can be used in automations or dashboards to monitor modem health and call activity.
+The signal and network sensors are polled periodically; the call-state, incoming-call, and last-SMS sensors update as calls and messages come and go. All can be used in automations or dashboards to monitor modem health and activity.
 
 ## Troubleshooting
 

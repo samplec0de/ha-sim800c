@@ -19,17 +19,24 @@ from custom_components.sim800c.modem import (
     CALL_STAT_ALERTING,
     CALL_STAT_INCOMING,
     CallInfo,
+    SmsMessage,
 )
 
 
 class FakeModem:
-    """Scripted stand-in for the Modem, returning canned CLCC snapshots."""
+    """Scripted stand-in for the Modem, returning canned CLCC/SMS snapshots."""
 
-    def __init__(self, states: list[CallInfo | None]) -> None:
-        """Queue the CLCC snapshots successive get_current_call calls return."""
-        self._states = list(states)
+    def __init__(
+        self,
+        states: list[CallInfo | None] | None = None,
+        sms: list[SmsMessage] | None = None,
+    ) -> None:
+        """Queue the CLCC snapshots and unread SMS the modem should report."""
+        self._states = list(states) if states else [None]
+        self._sms = list(sms) if sms else []
         self.dialed: str | None = None
         self.hung_up = False
+        self.deleted: list[int] = []
 
     async def dial(self, number: str) -> None:
         """Record the dialed number."""
@@ -44,6 +51,16 @@ class FakeModem:
         if len(self._states) > 1:
             return self._states.pop(0)
         return self._states[0] if self._states else None
+
+    async def list_unread_sms(self) -> list[SmsMessage]:
+        """Return queued unread SMS once, then nothing (as the modem would)."""
+        pending = self._sms
+        self._sms = []
+        return pending
+
+    async def delete_sms(self, index: int) -> None:
+        """Record the deleted message index."""
+        self.deleted.append(index)
 
 
 def make_hub(**kwargs: object) -> ModemHub:
@@ -137,3 +154,56 @@ async def test_incoming_call_clears_when_gone():
 def test_outgoing_state_mapping():
     assert hub_mod._outgoing_state(CALL_STAT_ACTIVE) == CALL_STATE_ACTIVE  # noqa: SLF001
     assert hub_mod._outgoing_state(CALL_STAT_ALERTING) == CALL_STATE_RINGING  # noqa: SLF001
+
+
+async def test_poll_incoming_sms_emits_deletes_and_caches():
+    received: list[SmsMessage] = []
+    updates: list[int] = []
+    hub = make_hub(
+        on_state_change=lambda: updates.append(1),
+        on_incoming_sms=received.append,
+    )
+    msg = SmsMessage(index=3, sender="+79990001122", timestamp="ts", text="Привет")
+    hub._modem = FakeModem(sms=[msg])  # noqa: SLF001
+
+    await hub.async_poll_incoming_sms()
+
+    assert received == [msg]
+    assert hub.last_sms == msg
+    assert hub._modem.deleted == [3]  # noqa: SLF001
+    assert updates  # sensor push happened
+
+    # Second poll: nothing new, no extra event/state push.
+    await hub.async_poll_incoming_sms()
+    assert received == [msg]
+
+
+async def test_poll_incoming_sms_no_messages_is_quiet():
+    received: list[SmsMessage] = []
+    updates: list[int] = []
+    hub = make_hub(
+        on_state_change=lambda: updates.append(1),
+        on_incoming_sms=received.append,
+    )
+    hub._modem = FakeModem(sms=[])  # noqa: SLF001
+
+    await hub.async_poll_incoming_sms()
+    assert received == []
+    assert updates == []
+    assert hub.last_sms is None
+
+
+async def test_poll_incoming_sms_multiple_deletes_each():
+    received: list[SmsMessage] = []
+    hub = make_hub(on_incoming_sms=received.append)
+    msgs = [
+        SmsMessage(index=1, sender="+79990001122", timestamp="t1", text="One"),
+        SmsMessage(index=2, sender="+79990003344", timestamp="t2", text="Two"),
+    ]
+    hub._modem = FakeModem(sms=msgs)  # noqa: SLF001
+
+    await hub.async_poll_incoming_sms()
+
+    assert [m.text for m in received] == ["One", "Two"]
+    assert hub._modem.deleted == [1, 2]  # noqa: SLF001
+    assert hub.last_sms == msgs[-1]

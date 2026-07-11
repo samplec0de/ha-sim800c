@@ -15,14 +15,20 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 
 from .const import (
+    ATTR_SENDER,
+    ATTR_TEXT,
+    ATTR_TIMESTAMP,
     CALL_STATE_ACTIVE,
     CALL_STATE_DIALING,
     CALL_STATE_IDLE,
     CALL_STATE_INCOMING,
     CALL_STATE_RINGING,
     DOMAIN,
-    SIGNAL_CALL_UPDATE,
+    SIGNAL_UPDATE,
 )
+
+# HA state values are capped at 255 chars; keep the full body in an attribute.
+_STATE_MAX = 255
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -46,6 +52,7 @@ async def async_setup_entry(
             SignalSensor(hub, entry.entry_id),
             NetworkSensor(hub, entry.entry_id),
             CallStateSensor(hub, entry.entry_id),
+            LastSmsSensor(hub, entry.entry_id),
         ]
     )
 
@@ -138,7 +145,7 @@ class CallStateSensor(SensorEntity):
         """Subscribe to modem call-state updates pushed by the hub."""
         self.async_on_remove(
             async_dispatcher_connect(
-                self.hass, SIGNAL_CALL_UPDATE, self.async_write_ha_state
+                self.hass, SIGNAL_UPDATE, self.async_write_ha_state
             )
         )
 
@@ -146,3 +153,50 @@ class CallStateSensor(SensorEntity):
     def native_value(self) -> str:
         """Return the current call state string."""
         return self._hub.call_state
+
+
+class LastSmsSensor(SensorEntity):
+    """Text of the most recently received SMS, with sender/time attributes."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Last SMS"
+    _attr_should_poll = False
+    _attr_icon = "mdi:message-text"
+
+    def __init__(self, hub: ModemHub, entry_id: str) -> None:
+        """Bind the sensor to its owning modem hub and config entry."""
+        self._hub = hub
+        self._attr_unique_id = f"{entry_id}_last_sms"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="SIM800C",
+            manufacturer="SIMCom",
+            model="SIM800C",
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to updates pushed by the hub when an SMS arrives."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_UPDATE, self.async_write_ha_state
+            )
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the last SMS text (truncated to the HA state length limit)."""
+        if self._hub.last_sms is None:
+            return None
+        return self._hub.last_sms.text[:_STATE_MAX]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str] | None:
+        """Expose the sender, full text, and timestamp of the last SMS."""
+        sms = self._hub.last_sms
+        if sms is None:
+            return None
+        return {
+            ATTR_SENDER: sms.sender,
+            ATTR_TEXT: sms.text,
+            ATTR_TIMESTAMP: sms.timestamp,
+        }

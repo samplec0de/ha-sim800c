@@ -1,5 +1,6 @@
 from custom_components.sim800c.modem.encoding import (
     choose_encoding,
+    from_ucs2_hex,
     to_ucs2_hex,
 )
 
@@ -7,6 +8,22 @@ from custom_components.sim800c.modem.encoding import (
 def test_ucs2_hex_uppercase_four_digits():
     assert to_ucs2_hex("A") == "0041"
     assert to_ucs2_hex("Пи") == "041F0438"
+
+
+def test_from_ucs2_hex_roundtrip():
+    assert from_ucs2_hex("0041") == "A"
+    assert from_ucs2_hex("041F0438") == "Пи"
+    assert from_ucs2_hex(to_ucs2_hex("Привет!")) == "Привет!"
+
+
+def test_from_ucs2_hex_ignores_whitespace():
+    assert from_ucs2_hex("041F 0438") == "Пи"
+
+
+def test_from_ucs2_hex_returns_input_on_bad_hex():
+    # Not valid UCS2 hex (odd grouping) — return unchanged rather than raise.
+    assert from_ucs2_hex("Hello") == "Hello"
+    assert from_ucs2_hex("XYZ") == "XYZ"
 
 
 def test_choose_encoding_prefers_gsm_for_ascii():

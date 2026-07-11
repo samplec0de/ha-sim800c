@@ -12,6 +12,7 @@ from .modem import (
     CALL_STAT_WAITING,
     CallInfo,
     Modem,
+    SmsMessage,
 )
 from .transport import Transport
 
@@ -29,6 +30,7 @@ __all__ = [
     "ModemError",
     "ModemTimeout",
     "NotRegistered",
+    "SmsMessage",
     "SmsSendError",
     "Transport",
 ]

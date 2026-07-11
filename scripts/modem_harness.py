@@ -70,6 +70,20 @@ async def _run_monitor(modem: Modem, seconds: float) -> None:
             last = desc
 
 
+async def _run_sms_watch(modem: Modem, seconds: float, *, delete: bool) -> None:
+    """Poll for unread SMS for `seconds`, printing (and optionally deleting) them."""
+    print(f"watching for incoming SMS for {seconds}s (delete={delete})...")
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        await asyncio.sleep(2.0)
+        for msg in await modem.list_unread_sms():
+            print(f"SMS #{msg.index} from {msg.sender} at {msg.timestamp}:")
+            print(f"    {msg.text!r}")
+            if delete:
+                await modem.delete_sms(msg.index)
+                print(f"    (deleted #{msg.index})")
+
+
 async def main() -> int:
     """Parse CLI args and run the requested modem command against real hardware."""
     parser = argparse.ArgumentParser()
@@ -85,6 +99,10 @@ async def main() -> int:
     call.add_argument("--ring", type=float, default=20.0)
     monitor = sub.add_parser("monitor")
     monitor.add_argument("--seconds", type=float, default=60.0)
+    sms = sub.add_parser("sms")
+    sms.add_argument("--seconds", type=float, default=60.0)
+    sms.add_argument("--delete", action="store_true")
+    sub.add_parser("cnum")
     args = parser.parse_args()
 
     transport = Transport(args.device, args.baud)
@@ -102,6 +120,11 @@ async def main() -> int:
             await _run_call(modem, args.number, args.ring)
         elif args.cmd == "monitor":
             await _run_monitor(modem, args.seconds)
+        elif args.cmd == "sms":
+            await _run_sms_watch(modem, args.seconds, delete=args.delete)
+        elif args.cmd == "cnum":
+            # Own subscriber number, if provisioned on the SIM.
+            print(await transport.execute("AT+CNUM"))
     finally:
         await transport.close()
     return 0
