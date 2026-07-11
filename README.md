@@ -218,6 +218,8 @@ When someone calls the SIM, two things happen:
 - `binary_sensor.sim800c_incoming_call` turns **on** while the phone is ringing. Its `caller` attribute holds the caller's number (requires caller-ID / `+CLIP`, which the integration enables automatically).
 - A `sim800c_incoming_call` **event** fires with `{"caller": "+7..."}`.
 
+The binary sensor's `caller` attribute is cleared when the call ends. If you need the last caller's number to persist after the call is over (e.g. for a missed-call notification), read `sensor.sim800c_last_caller`, which keeps the most recent incoming caller's number until the next call replaces it.
+
 Example automation reacting to an incoming call:
 
 ```yaml
@@ -386,6 +388,7 @@ The integration exposes two diagnostic sensors per configured modem:
 - `sensor.sim800c_network` — network registration state (`registered` or `searching`).
 - `sensor.sim800c_call_state` — current call state (`idle` / `dialing` / `ringing` / `active` / `incoming`), updated live.
 - `sensor.sim800c_last_sms` — text of the most recently received SMS, with `sender`, `text`, and `timestamp` attributes.
+- `sensor.sim800c_last_caller` — number of the most recent incoming caller. Unlike the binary sensor's `caller` attribute (which clears when the call ends), this value persists after the call is over, so a missed call's number stays available.
 - `binary_sensor.sim800c_incoming_call` — `on` while an incoming call is ringing, with the caller number in its `caller` attribute.
 
 The signal and network sensors are polled periodically; the call-state, incoming-call, and last-SMS sensors update as calls and messages come and go. All can be used in automations or dashboards to monitor modem health and activity.

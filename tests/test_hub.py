@@ -151,6 +151,42 @@ async def test_incoming_call_clears_when_gone():
     assert hub.call_state == CALL_STATE_IDLE
 
 
+async def test_last_caller_persists_after_call_clears():
+    hub = make_hub()
+    hub._modem = FakeModem(  # noqa: SLF001
+        [CallInfo(CALL_DIR_INCOMING, CALL_STAT_INCOMING, "+79990001122"), None]
+    )
+    await hub._refresh_call_state()  # noqa: SLF001
+    assert hub.last_caller == "+79990001122"
+
+    # Call ends: incoming state clears, but last_caller must persist.
+    await hub._refresh_call_state()  # noqa: SLF001
+    assert hub.incoming_call is False
+    assert hub.incoming_number is None
+    assert hub.last_caller == "+79990001122"
+
+
+async def test_last_caller_not_overwritten_by_unknown_number():
+    hub = make_hub()
+    hub._modem = FakeModem(  # noqa: SLF001
+        [
+            CallInfo(CALL_DIR_INCOMING, CALL_STAT_INCOMING, "+79990001122"),
+            None,
+            CallInfo(CALL_DIR_INCOMING, CALL_STAT_INCOMING, None),
+        ]
+    )
+    await hub._refresh_call_state()  # noqa: SLF001
+    assert hub.last_caller == "+79990001122"
+
+    # Call clears, then a new incoming call arrives with no caller ID.
+    await hub._refresh_call_state()  # noqa: SLF001
+    await hub._refresh_call_state()  # noqa: SLF001
+    assert hub.incoming_call is True
+    assert hub.incoming_number is None
+    # A None-number call must not clobber the known last_caller.
+    assert hub.last_caller == "+79990001122"
+
+
 def test_outgoing_state_mapping():
     assert hub_mod._outgoing_state(CALL_STAT_ACTIVE) == CALL_STATE_ACTIVE  # noqa: SLF001
     assert hub_mod._outgoing_state(CALL_STAT_ALERTING) == CALL_STATE_RINGING  # noqa: SLF001
