@@ -20,6 +20,7 @@ from .const import (
     EVENT_INCOMING_SMS,
     LOGGER,
     PLATFORMS,
+    SERVICE_ANSWER_AND_RECORD,
     SERVICE_CALL,
     SERVICE_CALL_AND_PLAY,
     SERVICE_HANG_UP,
@@ -36,13 +37,14 @@ if TYPE_CHECKING:
 
     from .modem import SmsMessage
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 _SERVICES = (
     SERVICE_SEND_SMS,
     SERVICE_CALL,
     SERVICE_CALL_AND_PLAY,
     SERVICE_HANG_UP,
+    SERVICE_ANSWER_AND_RECORD,
 )
 
 

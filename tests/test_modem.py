@@ -363,6 +363,71 @@ async def test_stop_audio_tolerates_error():
     await modem.stop_audio()  # must not raise
 
 
+async def test_answer_sends_ata():
+    modem, transport, fake = make_modem([("ATA", b"\r\nOK\r\n")])
+    await transport.connect()
+    await modem.answer()
+    assert b"ATA\r\n" in b"".join(fake.written)
+
+
+async def test_start_recording_sends_crec_with_channel():
+    modem, transport, fake = make_modem([("AT\\+CREC=1", b"\r\nOK\r\n")])
+    await transport.connect()
+    await modem.start_recording()
+    # The trailing ,0 channel arg is required (verified on hardware).
+    assert b'AT+CREC=1,"C:\\User\\rec.amr",0\r\n' in b"".join(fake.written)
+
+
+async def test_stop_recording_sends_provisional_crec():
+    modem, transport, fake = make_modem([("AT\\+CREC=2", b"\r\nOK\r\n")])
+    await transport.connect()
+    await modem.stop_recording()
+    assert b"AT+CREC=2\r\n" in b"".join(fake.written)
+
+
+async def test_stop_recording_tolerates_error():
+    # AT+CREC=2 errors when nothing is recording; stop_recording must not raise.
+    modem, transport, _ = make_modem([("AT\\+CREC=2", b"\r\n+CME ERROR: 3\r\n")])
+    await transport.connect()
+    await modem.stop_recording()  # must not raise
+
+
+async def test_file_size_parses_fsflsize():
+    modem, transport, _ = make_modem(
+        [("AT\\+FSFLSIZE", b"\r\n+FSFLSIZE: 1234\r\n\r\nOK\r\n")]
+    )
+    await transport.connect()
+    assert await modem.file_size("C:\\User\\rec.amr") == 1234
+
+
+async def test_file_size_raises_without_fsflsize():
+    modem, transport, _ = make_modem([("AT\\+FSFLSIZE", b"\r\nOK\r\n")])
+    await transport.connect()
+    with pytest.raises(ModemError):
+        await modem.file_size("C:\\User\\rec.amr")
+
+
+async def test_delete_file_sends_fsdel():
+    modem, transport, fake = make_modem([("AT\\+FSDEL", b"\r\nOK\r\n")])
+    await transport.connect()
+    await modem.delete_file("C:\\User\\rec.amr")
+    assert b"AT+FSDEL=C:\\User\\rec.amr\r\n" in b"".join(fake.written)
+
+
+async def test_delete_file_tolerates_error():
+    modem, transport, _ = make_modem([("AT\\+FSDEL", b"\r\nERROR\r\n")])
+    await transport.connect()
+    await modem.delete_file("C:\\User\\missing.amr")  # must not raise
+
+
+async def test_read_file_extracts_payload_before_ok():
+    # Modem frames the raw bytes then a trailing OK; read_file returns the
+    # `size` bytes immediately before that OK (single chunk here).
+    modem, transport, _ = make_modem([("AT\\+FSREAD", b"\r\nHELLO\r\nOK\r\n")])
+    await transport.connect()
+    assert await modem.read_file("C:\\User\\rec.amr", 5) == b"HELLO"
+
+
 async def test_initialize_enables_csdh():
     modem, transport, fake = make_modem(
         [

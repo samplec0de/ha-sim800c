@@ -23,6 +23,7 @@ from .modem import (
     NotRegistered,
     Transport,
 )
+from .modem.modem import _REC_PATH
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -64,13 +65,14 @@ class CallResult:
 class ModemHub:
     """Serialize Home Assistant access to a single SIM800C modem."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 — one optional callback per event surface, all keyword
         self,
         device: str,
         baud: int,
         on_state_change: Callable[[], None] | None = None,
         on_incoming_call: Callable[[str | None], None] | None = None,
         on_incoming_sms: Callable[[SmsMessage], None] | None = None,
+        on_call_recorded: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         """Create a hub bound to the given serial device and baud rate."""
         self._transport = Transport(device, baud)
@@ -82,6 +84,7 @@ class ModemHub:
         self.incoming_number: str | None = None
         self.last_caller: str | None = None
         self.last_sms: SmsMessage | None = None
+        self.last_recording: dict[str, object] | None = None
         self._send_lock = asyncio.Lock()
         self._call_lock = asyncio.Lock()
         self._state_lock = asyncio.Lock()
@@ -90,6 +93,7 @@ class ModemHub:
         self._on_state_change = on_state_change
         self._on_incoming_call = on_incoming_call
         self._on_incoming_sms = on_incoming_sms
+        self._on_call_recorded = on_call_recorded
 
     async def async_start(self) -> None:
         """Open the serial connection, initialize, and start call monitoring."""
@@ -257,6 +261,91 @@ class ModemHub:
         except ModemError as err:
             # ATH with no active call errors on some firmware; harmless.
             LOGGER.debug("Hang-up returned an error (likely no active call): %s", err)
+
+    # --- incoming call recording ---------------------------------------
+
+    async def async_answer_and_record(self, record_seconds: float) -> bytes | None:
+        """
+        Answer a ringing incoming call, record the caller, and return the audio.
+
+        Confirms a ringing incoming call, answers it (ATA), records the in-call
+        audio to the modem's flash for up to `record_seconds` (stopping early if
+        the caller hangs up), reads the recording back off the modem, hangs up,
+        and deletes the file. Returns the raw AMR-NB bytes, or None if there was
+        no incoming call or the recording was empty. The HA layer handles the
+        file save, transcription, and event.
+        """
+        async with self._call_lock:
+            call = await self._modem.get_current_call()
+            if call is None or not call.is_incoming:
+                LOGGER.info("answer_and_record: no incoming call to answer")
+                return None
+
+            await self._modem.answer()
+            # Confirm the call actually connected (stat=active) before recording;
+            # otherwise we would record ringback / a network announcement.
+            if not await self._await_active():
+                LOGGER.warning("Call did not become active after answering")
+                await self._safe_hangup()
+                async with self._state_lock:
+                    self._apply_call(None)
+                return None
+            LOGGER.info(
+                "Answered call from %s; recording up to %ss",
+                call.number or "unknown",
+                record_seconds,
+            )
+            await self._modem.start_recording()
+
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + record_seconds
+            while loop.time() < deadline:
+                await asyncio.sleep(_CALL_POLL_INTERVAL)
+                if await self._refresh_call_state() is None:
+                    LOGGER.info("Caller hung up during recording")
+                    break
+
+            await self._modem.stop_recording()
+
+            data = await self._read_recording()
+
+            await self._safe_hangup()
+            async with self._state_lock:
+                self._apply_call(None)
+            await self._modem.delete_file(_REC_PATH)
+            return data
+
+    async def _await_active(
+        self,
+        timeout: float = 6.0,  # noqa: ASYNC109 — polling budget, not a cancellation timeout
+    ) -> bool:
+        """Poll until the current call is answered (active), or time out."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            await asyncio.sleep(_CALL_POLL_INTERVAL)
+            call = await self._refresh_call_state()
+            if call is None:
+                return False  # caller gave up before we connected
+            if call.is_answered:
+                return True
+        return False
+
+    async def _read_recording(self) -> bytes | None:
+        """Read the just-recorded file off the modem, or None if empty/failed."""
+        try:
+            size = await self._modem.file_size(_REC_PATH)
+        except ModemError as err:
+            LOGGER.warning("Could not stat recording %s: %s", _REC_PATH, err)
+            return None
+        if size <= 0:
+            LOGGER.warning("Recording %s is empty", _REC_PATH)
+            return None
+        try:
+            return await self._modem.read_file(_REC_PATH, size)
+        except ModemError as err:
+            LOGGER.warning("Could not read recording %s: %s", _REC_PATH, err)
+            return None
 
     # --- background monitoring -----------------------------------------
 
