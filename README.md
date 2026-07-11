@@ -7,7 +7,7 @@ Supports **SMS** (send and receive) and **voice calls** (ring alerts / missed-ca
 ## Features
 
 - Send SMS messages via the `sim800c.send_sms` service
-- Receive SMS: `sensor.sim800c_last_sms` and the `sim800c_incoming_sms` event, with automatic GSM/UCS2 decoding
+- Receive SMS: `sensor.sim800c_last_sms` (+ `sensor.sim800c_last_sms_sender` for the sender's number) and the `sim800c_incoming_sms` event, with automatic GSM/UCS2 decoding
 - Place voice calls via the `sim800c.call` service, with automatic hang-up and answered/no-answer reporting (no audio is played)
 - Play a pre-made **AMR-NB** audio clip into a call via the `sim800c.call_and_play` service, so the callee hears it, with automatic hang-up
 - Answer a ringing call, record the caller, and **transcribe** it via a local Whisper-compatible STT service (GigaAM) with the `sim800c.answer_and_record` service; result exposed via `sensor.sim800c_last_recording` and the `sim800c_call_recorded` event
@@ -474,6 +474,7 @@ The integration exposes two diagnostic sensors per configured modem:
 - `sensor.sim800c_network` — network registration state (`registered` or `searching`).
 - `sensor.sim800c_call_state` — current call state (`idle` / `dialing` / `ringing` / `active` / `incoming`), updated live.
 - `sensor.sim800c_last_sms` — text of the most recently received SMS, with `sender`, `text`, and `timestamp` attributes.
+- `sensor.sim800c_last_sms_sender` — number of the most recent SMS sender (the `sender` as the sensor's state, mirroring `sensor.sim800c_last_caller`), persisted until the next message.
 - `sensor.sim800c_last_caller` — number of the most recent incoming caller. Unlike the binary sensor's `caller` attribute (which clears when the call ends), this value persists after the call is over, so a missed call's number stays available.
 - `sensor.sim800c_last_recording` — transcript of the most recently recorded call (via `sim800c.answer_and_record`), with `caller`, `path`, `url`, `transcript`, and `timestamp` attributes.
 - `binary_sensor.sim800c_incoming_call` — `on` while an incoming call is ringing, with the caller number in its `caller` attribute.

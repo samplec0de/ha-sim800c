@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-11
+
+### Added
+- `sensor.sim800c_last_sms_sender`: the phone number of the most recent SMS sender as the sensor's state (mirroring `sensor.sim800c_last_caller` for calls), persisted until the next message. The sender is also still available as an attribute of `sensor.sim800c_last_sms`.
+
 ## [0.7.0] - 2026-07-11
 
 ### Added

@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
     from .modem import SmsMessage
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 _SERVICES = (
     SERVICE_SEND_SMS,
