@@ -263,10 +263,17 @@ automation:
 
 > **Heads-up:** many `ffmpeg` builds — including the default **Homebrew** build on macOS and the `ffmpeg` bundled with Home Assistant OS — are compiled **without** the AMR encoder, so `-c:a libopencore_amrnb` fails with `Unknown encoder 'libopencore_amrnb'`. You need either an ffmpeg built with `--enable-libopencore-amrnb`, or the tiny standalone encoder below.
 
-**Option A — ffmpeg with the AMR encoder** (if your build has it; check with `ffmpeg -encoders | grep amr`):
+**Option A — ffmpeg with the AMR encoder** (check yours with `ffmpeg -encoders | grep amr`):
 
 ```bash
 ffmpeg -i input.wav -ar 8000 -ac 1 -c:a libopencore_amrnb -b:a 12.2k alert.amr
+```
+
+If your `ffmpeg` lacks the encoder, build one from source (into `build/ffmpeg-amr/`, no system ffmpeg touched) with the included script — it installs `opencore-amr` and compiles a GPL ffmpeg with `--enable-libopencore-amrnb` (macOS/Homebrew and Debian/Ubuntu):
+
+```bash
+scripts/build-ffmpeg-amr.sh
+# then: build/ffmpeg-amr/bin/ffmpeg -i input.wav -ar 8000 -ac 1 -c:a libopencore_amrnb -b:a 12.2k alert.amr
 ```
 
 **Option B — a ~20-line encoder using the opencore-amr library** (works when ffmpeg lacks the encoder, e.g. on macOS/Homebrew):
