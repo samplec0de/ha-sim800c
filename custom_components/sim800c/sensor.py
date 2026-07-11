@@ -53,6 +53,7 @@ async def async_setup_entry(
             NetworkSensor(hub, entry.entry_id),
             CallStateSensor(hub, entry.entry_id),
             LastSmsSensor(hub, entry.entry_id),
+            LastCallerSensor(hub, entry.entry_id),
         ]
     )
 
@@ -200,3 +201,36 @@ class LastSmsSensor(SensorEntity):
             ATTR_TEXT: sms.text,
             ATTR_TIMESTAMP: sms.timestamp,
         }
+
+
+class LastCallerSensor(SensorEntity):
+    """Number of the most recent incoming caller, persisted across calls."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Last caller"
+    _attr_should_poll = False
+    _attr_icon = "mdi:phone-incoming"
+
+    def __init__(self, hub: ModemHub, entry_id: str) -> None:
+        """Bind the sensor to its owning modem hub and config entry."""
+        self._hub = hub
+        self._attr_unique_id = f"{entry_id}_last_caller"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="SIM800C",
+            manufacturer="SIMCom",
+            model="SIM800C",
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to updates pushed by the hub when a call arrives."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_UPDATE, self.async_write_ha_state
+            )
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the number of the last person who called."""
+        return self._hub.last_caller

@@ -72,6 +72,7 @@ class ModemHub:
         self.call_state: str = CALL_STATE_IDLE
         self.incoming_call: bool = False
         self.incoming_number: str | None = None
+        self.last_caller: str | None = None
         self.last_sms: SmsMessage | None = None
         self._send_lock = asyncio.Lock()
         self._call_lock = asyncio.Lock()
@@ -233,9 +234,14 @@ class ModemHub:
             self.call_state = _outgoing_state(call.state)
 
         # Fire the incoming-call event on the rising edge only.
-        if self.incoming_call and not prev_incoming and self._on_incoming_call:
-            LOGGER.info("Incoming call from %s", self.incoming_number or "unknown")
-            self._on_incoming_call(self.incoming_number)
+        if self.incoming_call and not prev_incoming:
+            # Persist the caller's number when known; never overwrite a known
+            # last_caller with None, and never clear it when the call ends.
+            if self.incoming_number is not None:
+                self.last_caller = self.incoming_number
+            if self._on_incoming_call:
+                LOGGER.info("Incoming call from %s", self.incoming_number or "unknown")
+                self._on_incoming_call(self.incoming_number)
 
         if (
             self.call_state != prev_state or self.incoming_call != prev_incoming
