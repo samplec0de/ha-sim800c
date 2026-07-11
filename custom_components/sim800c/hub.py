@@ -27,13 +27,16 @@ from .modem import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .modem import CallInfo
+    from .modem import CallInfo, SmsMessage
 
 _MAX_ATTEMPTS = 3
 _RETRY_BACKOFF = 2.0
 
 # How often the background loop polls AT+CLCC to catch incoming calls.
 _MONITOR_INTERVAL = 3.0
+# Poll for received SMS every Nth monitor tick (~9s at the default interval);
+# SMS is far less latency-sensitive than call state.
+_SMS_POLL_EVERY = 3
 # Faster polling while we are actively driving an outgoing call.
 _CALL_POLL_INTERVAL = 1.0
 # Default seconds to let an outgoing call ring before auto-hanging-up.
@@ -59,6 +62,7 @@ class ModemHub:
         baud: int,
         on_state_change: Callable[[], None] | None = None,
         on_incoming_call: Callable[[str | None], None] | None = None,
+        on_incoming_sms: Callable[[SmsMessage], None] | None = None,
     ) -> None:
         """Create a hub bound to the given serial device and baud rate."""
         self._transport = Transport(device, baud)
@@ -68,12 +72,15 @@ class ModemHub:
         self.call_state: str = CALL_STATE_IDLE
         self.incoming_call: bool = False
         self.incoming_number: str | None = None
+        self.last_sms: SmsMessage | None = None
         self._send_lock = asyncio.Lock()
         self._call_lock = asyncio.Lock()
         self._state_lock = asyncio.Lock()
+        self._sms_lock = asyncio.Lock()
         self._monitor_task: asyncio.Task[None] | None = None
         self._on_state_change = on_state_change
         self._on_incoming_call = on_incoming_call
+        self._on_incoming_sms = on_incoming_sms
 
     async def async_start(self) -> None:
         """Open the serial connection, initialize, and start call monitoring."""
@@ -162,6 +169,7 @@ class ModemHub:
     # --- background monitoring -----------------------------------------
 
     async def _monitor_loop(self) -> None:
+        ticks = 0
         while True:
             await asyncio.sleep(_MONITOR_INTERVAL)
             if self._call_lock.locked():
@@ -171,6 +179,31 @@ class ModemHub:
                 await self._refresh_call_state()
             except ModemError as err:
                 LOGGER.debug("Call-state poll failed: %s", err)
+
+            ticks += 1
+            if ticks % _SMS_POLL_EVERY == 0:
+                try:
+                    await self.async_poll_incoming_sms()
+                except ModemError as err:
+                    LOGGER.debug("SMS poll failed: %s", err)
+
+    async def async_poll_incoming_sms(self) -> None:
+        """Read unread SMS, emit them, and delete each from the modem."""
+        async with self._sms_lock:
+            messages = await self._modem.list_unread_sms()
+            for message in messages:
+                LOGGER.info("SMS received from %s", message.sender)
+                self.last_sms = message
+                if self._on_incoming_sms:
+                    self._on_incoming_sms(message)
+                try:
+                    await self._modem.delete_sms(message.index)
+                except ModemError as err:
+                    # Already marked READ by the list, so it won't re-fire;
+                    # deletion is only to free storage.
+                    LOGGER.warning("Could not delete SMS %s: %s", message.index, err)
+            if messages and self._on_state_change:
+                self._on_state_change()
 
     async def _refresh_call_state(self) -> CallInfo | None:
         """Poll AT+CLCC once and update cached call state atomically."""

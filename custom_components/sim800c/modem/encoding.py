@@ -8,6 +8,22 @@ def to_ucs2_hex(text: str) -> str:
     return "".join(f"{ord(char):04X}" for char in text)
 
 
+def from_ucs2_hex(hex_str: str) -> str:
+    """
+    Decode a UCS2 (UTF-16 big-endian) hex string back to text.
+
+    Whitespace is ignored. Returns the input unchanged if it is not valid
+    UCS2 hex, so a mis-tagged GSM body never raises.
+    """
+    cleaned = "".join(hex_str.split())
+    if len(cleaned) % 4 != 0:
+        return hex_str
+    try:
+        return bytes.fromhex(cleaned).decode("utf-16-be")
+    except (ValueError, UnicodeDecodeError):
+        return hex_str
+
+
 def choose_encoding(text: str, force_unicode: bool) -> str:  # noqa: FBT001 — public API, matches the send_sms service field
     """
     Return 'GSM' or 'UCS2' for the given text.

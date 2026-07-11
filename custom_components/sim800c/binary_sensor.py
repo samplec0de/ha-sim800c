@@ -11,7 +11,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 
-from .const import ATTR_CALLER, DOMAIN, SIGNAL_CALL_UPDATE
+from .const import ATTR_CALLER, DOMAIN, SIGNAL_UPDATE
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -54,7 +54,7 @@ class IncomingCallSensor(BinarySensorEntity):
         """Subscribe to modem call-state updates pushed by the hub."""
         self.async_on_remove(
             async_dispatcher_connect(
-                self.hass, SIGNAL_CALL_UPDATE, self.async_write_ha_state
+                self.hass, SIGNAL_UPDATE, self.async_write_ha_state
             )
         )
 

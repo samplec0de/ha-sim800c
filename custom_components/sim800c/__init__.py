@@ -10,16 +10,20 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
     ATTR_CALLER,
+    ATTR_SENDER,
+    ATTR_TEXT,
+    ATTR_TIMESTAMP,
     CONF_BAUD_RATE,
     DEFAULT_BAUD_RATE,
     DOMAIN,
     EVENT_INCOMING_CALL,
+    EVENT_INCOMING_SMS,
     LOGGER,
     PLATFORMS,
     SERVICE_CALL,
     SERVICE_HANG_UP,
     SERVICE_SEND_SMS,
-    SIGNAL_CALL_UPDATE,
+    SIGNAL_UPDATE,
 )
 from .hub import ModemHub
 from .modem import ModemError
@@ -29,7 +33,9 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
-__version__ = "0.3.0"
+    from .modem import SmsMessage
+
+__version__ = "0.4.0"
 
 _SERVICES = (SERVICE_SEND_SMS, SERVICE_CALL, SERVICE_HANG_UP)
 
@@ -39,16 +45,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     baud = entry.data.get(CONF_BAUD_RATE, DEFAULT_BAUD_RATE)
 
     def _on_state_change() -> None:
-        async_dispatcher_send(hass, SIGNAL_CALL_UPDATE)
+        async_dispatcher_send(hass, SIGNAL_UPDATE)
 
     def _on_incoming_call(caller: str | None) -> None:
         hass.bus.async_fire(EVENT_INCOMING_CALL, {ATTR_CALLER: caller})
+
+    def _on_incoming_sms(message: SmsMessage) -> None:
+        hass.bus.async_fire(
+            EVENT_INCOMING_SMS,
+            {
+                ATTR_SENDER: message.sender,
+                ATTR_TEXT: message.text,
+                ATTR_TIMESTAMP: message.timestamp,
+            },
+        )
 
     hub = ModemHub(
         entry.data[CONF_DEVICE],
         baud,
         on_state_change=_on_state_change,
         on_incoming_call=_on_incoming_call,
+        on_incoming_sms=_on_incoming_sms,
     )
     try:
         await hub.async_start()

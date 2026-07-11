@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-11
+
+### Added
+- Incoming SMS monitoring: received messages are detected by a background poll of `AT+CMGL="REC UNREAD"`, serialized with calls and outgoing SMS through the existing transport lock.
+- `sim800c_incoming_sms` event, fired with `{"sender", "text", "timestamp"}` for each received message.
+- `sensor.sim800c_last_sms`: text of the most recently received SMS, with `sender`, `text` (full body), and `timestamp` attributes.
+- Automatic decoding of both GSM 7-bit and UCS2 (Cyrillic/Unicode) message bodies; `AT+CSDH=1` is enabled during initialization so the message's data-coding scheme is available for correct decoding.
+- Modem layer: `Modem.list_unread_sms()` (parses `AT+CMGL`) and `Modem.delete_sms()`; `encoding.from_ucs2_hex()`.
+- Harness: `sms` (watch/parse received messages) and `cnum` (own number) subcommands in `scripts/modem_harness.py`.
+
+### Changed
+- After a received SMS is read and its event emitted, the message is deleted from the modem (`AT+CMGD`) to avoid duplicate events and prevent the SIM storage from filling up. Listing unread messages also marks them read, so no duplicate event fires even if a delete fails.
+
+### Notes
+- Long (multi-part) SMS are reported as separate messages/events, one per part; the integration does not reassemble concatenated SMS.
+
 ## [0.3.0] - 2026-07-11
 
 ### Added

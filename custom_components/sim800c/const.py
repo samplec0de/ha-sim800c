@@ -29,11 +29,15 @@ CALL_STATE_RINGING = "ringing"
 CALL_STATE_ACTIVE = "active"
 CALL_STATE_INCOMING = "incoming"
 
-# Event fired on an incoming call
+# Events
 EVENT_INCOMING_CALL = f"{DOMAIN}_incoming_call"
+EVENT_INCOMING_SMS = f"{DOMAIN}_incoming_sms"
 ATTR_CALLER = "caller"
+ATTR_SENDER = "sender"
+ATTR_TEXT = "text"
+ATTR_TIMESTAMP = "timestamp"
 
 # Dispatcher signal used to push modem state to entities
-SIGNAL_CALL_UPDATE = f"{DOMAIN}_call_update"
+SIGNAL_UPDATE = f"{DOMAIN}_update"
 
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR]
