@@ -195,6 +195,141 @@ Or trigger on the binary sensor state:
 
 > **Note:** The integration does not answer incoming calls (there is no audio path); it only reports them. Incoming calls are detected by polling the modem every few seconds, so a very short ring may occasionally be missed.
 
+## Automation Examples
+
+All numbers below are placeholders — replace them with your own.
+
+### Ring alert on an event (missed-call notification)
+
+Call your phone (no audio, just make it ring) when something important happens, e.g. an alarm is triggered:
+
+```yaml
+automation:
+  - alias: "Ring me when the alarm triggers"
+    triggers:
+      - trigger: state
+        entity_id: alarm_control_panel.home
+        to: "triggered"
+    actions:
+      - action: sim800c.call
+        data:
+          target: "+79990001122"
+          ring_duration: 20
+```
+
+### Call, and fall back to SMS if unanswered
+
+Use the service response to branch: if nobody picks up, send an SMS instead.
+
+```yaml
+automation:
+  - alias: "Water leak: call, else SMS"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.water_leak
+        to: "on"
+    actions:
+      - action: sim800c.call
+        data:
+          target: "+79990001122"
+          ring_duration: 25
+        response_variable: call_result
+      - if:
+          - condition: template
+            value_template: "{{ not call_result.answered }}"
+        then:
+          - action: sim800c.send_sms
+            data:
+              target: "+79990001122"
+              message: "⚠️ Water leak detected at home! (call went unanswered)"
+```
+
+### Retry the call until it is answered
+
+Loop a few times, stopping as soon as the call is picked up.
+
+```yaml
+automation:
+  - alias: "Insist until answered"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.freezer_door
+        to: "on"
+        for: "00:10:00"
+    actions:
+      - repeat:
+          count: 3
+          sequence:
+            - action: sim800c.call
+              data:
+                target: "+79990001122"
+                ring_duration: 25
+              response_variable: call_result
+            - if:
+                - condition: template
+                  value_template: "{{ call_result.answered }}"
+              then:
+                - stop: "Answered"
+            - delay: "00:01:00"
+```
+
+### Notify on an incoming call (with caller ID)
+
+```yaml
+automation:
+  - alias: "Notify on incoming call"
+    triggers:
+      - trigger: event
+        event_type: sim800c_incoming_call
+    actions:
+      - action: notify.mobile_app_phone
+        data:
+          title: "📞 Incoming call"
+          message: "From {{ trigger.event.data.caller or 'unknown number' }}"
+```
+
+### "Call to trigger" — act only on a specific caller
+
+Turn an incoming call from a known number into an action (e.g. open the gate). The integration never answers, so the caller is not charged — it's a free trigger. Restrict it to trusted numbers.
+
+```yaml
+automation:
+  - alias: "Open gate on call from a trusted number"
+    triggers:
+      - trigger: event
+        event_type: sim800c_incoming_call
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger.event.data.caller in
+             ['+79990001122', '+79990003344'] }}
+    actions:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.gate_relay
+```
+
+### Log missed calls
+
+```yaml
+automation:
+  - alias: "Log missed calls"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.sim800c_incoming_call
+        to: "off"
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.from_state.attributes.caller is not none }}"
+    actions:
+      - action: logbook.log
+        data:
+          name: "SIM800C"
+          message: "Missed call from {{ trigger.from_state.attributes.caller }}"
+```
+
+> **Tip:** the entity IDs above (`binary_sensor.sim800c_incoming_call`, etc.) may be prefixed with the modem's area — e.g. `binary_sensor.hallway_sim800c_incoming_call` — if you assigned the device to an area. Check **Settings → Devices & Services → SIM800C** for the exact IDs.
+
 ## Diagnostic Sensors
 
 The integration exposes two diagnostic sensors per configured modem:
