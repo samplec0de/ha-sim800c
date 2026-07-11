@@ -231,11 +231,7 @@ data:
 
 The service **returns a response** `{"answered": <bool>, "played": <bool>}` — `played` is `true` only if the call was answered and the clip was streamed into it.
 
-> **Audio must be AMR-NB (8 kHz, mono).** This is the format the SIM800C plays natively. You can generate speech with any TTS engine and convert the result, e.g. with `ffmpeg` built with an opencore-amr encoder:
->
-> ```bash
-> ffmpeg -i input.wav -ar 8000 -ac 1 -c:a libopencore_amrnb -b:a 12.2k alert.amr
-> ```
+> **Audio must be AMR-NB (8 kHz, mono).** This is the format the SIM800C plays natively. See [Producing an AMR-NB file](#producing-an-amr-nb-file) below. The modem's flash is small (~90 KB), so keep clips under roughly a minute.
 
 Example automation — a spoken voice-call alert, falling back to SMS if unanswered:
 
@@ -260,6 +256,54 @@ automation:
               target: "+79990001122"
               message: "⚠️ Water leak detected at home! (call went unanswered)"
 ```
+
+#### Producing an AMR-NB file
+
+`call_and_play` needs an **AMR-NB (8 kHz, mono)** file. Generate the speech/audio with any tool (a TTS engine, a recording, etc.), then encode it to AMR-NB.
+
+> **Heads-up:** many `ffmpeg` builds — including the default **Homebrew** build on macOS and the `ffmpeg` bundled with Home Assistant OS — are compiled **without** the AMR encoder, so `-c:a libopencore_amrnb` fails with `Unknown encoder 'libopencore_amrnb'`. You need either an ffmpeg built with `--enable-libopencore-amrnb`, or the tiny standalone encoder below.
+
+**Option A — ffmpeg with the AMR encoder** (if your build has it; check with `ffmpeg -encoders | grep amr`):
+
+```bash
+ffmpeg -i input.wav -ar 8000 -ac 1 -c:a libopencore_amrnb -b:a 12.2k alert.amr
+```
+
+**Option B — a ~20-line encoder using the opencore-amr library** (works when ffmpeg lacks the encoder, e.g. on macOS/Homebrew):
+
+```bash
+# 1. Install the library (macOS: Homebrew; Debian/Ubuntu: apt install libopencore-amrnb-dev)
+brew install opencore-amr
+
+# 2. Build a small PCM->AMR-NB encoder
+cat > pcm2amr.c <<'EOF'
+#include <stdio.h>
+#include <string.h>
+#include <opencore-amrnb/interf_enc.h>
+#define MODE MR122   /* 12.2 kbps */
+#define FRAME 160    /* 20 ms @ 8 kHz */
+int main(void) {
+    void *enc = Encoder_Interface_init(0);
+    if (!enc) return 1;
+    fwrite("#!AMR\n", 1, 6, stdout);           /* AMR file magic */
+    short pcm[FRAME]; unsigned char out[64]; size_t n;
+    while ((n = fread(pcm, sizeof(short), FRAME, stdin)) > 0) {
+        if (n < FRAME) memset(pcm + n, 0, (FRAME - n) * sizeof(short));
+        int b = Encoder_Interface_Encode(enc, MODE, pcm, out, 0);
+        if (b > 0) fwrite(out, 1, b, stdout);
+    }
+    Encoder_Interface_exit(enc);
+    return 0;
+}
+EOF
+P=$(brew --prefix opencore-amr)   # on Linux drop the -I/-L flags
+clang pcm2amr.c -I$P/include -L$P/lib -lopencore-amrnb -o pcm2amr
+
+# 3. Convert: any audio -> 8 kHz mono PCM -> AMR-NB (ffmpeg only decodes here)
+ffmpeg -y -i input.wav -ar 8000 -ac 1 -f s16le - | ./pcm2amr > alert.amr
+```
+
+Then copy `alert.amr` into an allowlisted directory such as `/media/sim800c/` (via the Media browser, the Samba add-on, or `scp`) and point `audio_file` at it.
 
 ### Hanging Up
 
