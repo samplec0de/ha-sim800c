@@ -1,5 +1,7 @@
 # SIM800C Integration for Home Assistant
 
+**English** | [Русский](README.ru.md)
+
 Home Assistant integration for SIM800C GSM module connected via USB/Serial.
 
 Supports **SMS** (send and receive) and **voice calls** (ring alerts / missed-call notifications).
