@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -9,6 +10,7 @@ from homeassistant.const import CONF_DEVICE
 from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.sim800c import stt
 from custom_components.sim800c.const import CONF_BAUD_RATE, DOMAIN
 from custom_components.sim800c.hub import CallResult
 from custom_components.sim800c.modem import ModemError
@@ -95,6 +97,7 @@ async def test_unload_entry_stops_hub_and_removes_service(hass):
         assert hass.services.has_service(DOMAIN, "call")
         assert hass.services.has_service(DOMAIN, "call_and_play")
         assert hass.services.has_service(DOMAIN, "hang_up")
+        assert hass.services.has_service(DOMAIN, "answer_and_record")
 
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
@@ -104,6 +107,7 @@ async def test_unload_entry_stops_hub_and_removes_service(hass):
         assert not hass.services.has_service(DOMAIN, "call")
         assert not hass.services.has_service(DOMAIN, "call_and_play")
         assert not hass.services.has_service(DOMAIN, "hang_up")
+        assert not hass.services.has_service(DOMAIN, "answer_and_record")
 
 
 async def _setup_with_mock_hub(hass) -> tuple:
@@ -127,6 +131,9 @@ async def _setup_with_mock_hub(hass) -> tuple:
     hub.async_call_and_play = AsyncMock(
         return_value=CallResult(answered=True, final_state="answered", played=True)
     )
+    hub.async_answer_and_record = AsyncMock(return_value=b"AMRDATA")
+    hub.last_caller = "+79990001122"
+    hub.last_recording = None
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     return hub, patcher
@@ -250,3 +257,76 @@ async def test_call_and_play_service_wraps_modem_error(hass, tmp_path):
             )
     finally:
         patcher.stop()
+
+
+async def test_answer_and_record_service_saves_transcribes_and_fires_event(hass):
+    hub, patcher = await _setup_with_mock_hub(hass)
+    events = []
+    hass.bus.async_listen("sim800c_call_recorded", events.append)
+    try:
+        with patch(
+            "custom_components.sim800c.services.stt.transcribe",
+            new=AsyncMock(return_value="hello world"),
+        ) as mock_stt:
+            response = await hass.services.async_call(
+                DOMAIN,
+                "answer_and_record",
+                {"record_seconds": 5},
+                blocking=True,
+                return_response=True,
+            )
+    finally:
+        patcher.stop()
+
+    hub.async_answer_and_record.assert_awaited_once_with(5.0)
+    mock_stt.assert_awaited_once()
+    assert response["recorded"] is True
+    assert response["transcript"] == "hello world"
+    # The recording is saved to disk and the path is returned.
+    assert Path(response["path"]).read_bytes() == b"AMRDATA"
+    await hass.async_block_till_done()
+    assert len(events) == 1
+    assert events[0].data["transcript"] == "hello world"
+    assert events[0].data["caller"] == "+79990001122"
+
+
+async def test_answer_and_record_service_no_incoming_call(hass):
+    hub, patcher = await _setup_with_mock_hub(hass)
+    hub.async_answer_and_record = AsyncMock(return_value=None)
+    try:
+        response = await hass.services.async_call(
+            DOMAIN,
+            "answer_and_record",
+            {},
+            blocking=True,
+            return_response=True,
+        )
+    finally:
+        patcher.stop()
+
+    # Default record_seconds applied by the schema.
+    hub.async_answer_and_record.assert_awaited_once_with(15.0)
+    assert response == {"recorded": False, "transcript": None, "path": None}
+
+
+async def test_answer_and_record_service_survives_stt_failure(hass):
+    _hub, patcher = await _setup_with_mock_hub(hass)
+    try:
+        with patch(
+            "custom_components.sim800c.services.stt.transcribe",
+            new=AsyncMock(side_effect=stt.SttError("stt down")),
+        ):
+            response = await hass.services.async_call(
+                DOMAIN,
+                "answer_and_record",
+                {"record_seconds": 5},
+                blocking=True,
+                return_response=True,
+            )
+    finally:
+        patcher.stop()
+
+    # STT failure still returns the recording, just with no transcript.
+    assert response["recorded"] is True
+    assert response["transcript"] is None
+    assert Path(response["path"]).read_bytes() == b"AMRDATA"

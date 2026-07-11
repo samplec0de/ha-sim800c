@@ -10,6 +10,7 @@ Supports **SMS** (send and receive) and **voice calls** (ring alerts / missed-ca
 - Receive SMS: `sensor.sim800c_last_sms` and the `sim800c_incoming_sms` event, with automatic GSM/UCS2 decoding
 - Place voice calls via the `sim800c.call` service, with automatic hang-up and answered/no-answer reporting (no audio is played)
 - Play a pre-made **AMR-NB** audio clip into a call via the `sim800c.call_and_play` service, so the callee hears it, with automatic hang-up
+- Answer a ringing call, record the caller, and **transcribe** it via a local Whisper-compatible STT service (GigaAM) with the `sim800c.answer_and_record` service; result exposed via `sensor.sim800c_last_recording` and the `sim800c_call_recorded` event _(draft — provisional AT commands, pending hardware verification)_
 - Hang up an active call via the `sim800c.hang_up` service
 - Detect incoming calls via `binary_sensor.sim800c_incoming_call` (with caller number) and the `sim800c_incoming_call` event
 - Live call state via `sensor.sim800c_call_state` (`idle` / `dialing` / `ringing` / `active` / `incoming`)
@@ -266,6 +267,39 @@ automation:
 service: sim800c.hang_up
 ```
 
+### Answering and Recording a Call (with transcription)
+
+> **Draft feature.** The record/read AT commands are **provisional** and pending
+> verification against real SIM800C hardware. The service and its wiring are in
+> place, but the exact AT strings may change after a hardware test.
+
+`sim800c.answer_and_record` answers a **ringing incoming call**, records what the
+caller says to the modem's flash, hangs up, then transcribes the recording via a
+local **Whisper-compatible** STT service (e.g. [GigaAM]) and returns the result:
+
+```yaml
+action: sim800c.answer_and_record
+data:
+  record_seconds: 15        # optional, 1-60 (default 15)
+  stt_url: "http://192.168.1.10:9000/v1"   # optional per-call override
+response_variable: rec
+```
+
+The response is `{"recorded": bool, "transcript": str | null, "path": str | null}`.
+The recording is saved under `<config>/media/sim800c/rec_<epoch>.amr`. The latest
+transcript is also exposed via `sensor.sim800c_last_recording` (with `caller`,
+`path`, `url`, `transcript`, and `timestamp` attributes), and a
+`sim800c_call_recorded` **event** fires with the same fields.
+
+If the STT service is unreachable, the recording is still saved and returned —
+only the transcript is `null` (and a warning is logged).
+
+> **STT URL on Home Assistant OS:** the default `http://127.0.0.1:9000/v1` points
+> at the HA container itself, not your STT host. On HAOS set the STT service's
+> **LAN IP** (e.g. `http://192.168.1.10:9000/v1`) via the `stt_url` field.
+
+[GigaAM]: https://github.com/salute-developers/GigaAM
+
 ### Detecting Incoming Calls
 
 When someone calls the SIM, two things happen:
@@ -444,6 +478,7 @@ The integration exposes two diagnostic sensors per configured modem:
 - `sensor.sim800c_call_state` — current call state (`idle` / `dialing` / `ringing` / `active` / `incoming`), updated live.
 - `sensor.sim800c_last_sms` — text of the most recently received SMS, with `sender`, `text`, and `timestamp` attributes.
 - `sensor.sim800c_last_caller` — number of the most recent incoming caller. Unlike the binary sensor's `caller` attribute (which clears when the call ends), this value persists after the call is over, so a missed call's number stays available.
+- `sensor.sim800c_last_recording` — transcript of the most recently recorded call (via `sim800c.answer_and_record`), with `caller`, `path`, `url`, `transcript`, and `timestamp` attributes.
 - `binary_sensor.sim800c_incoming_call` — `on` while an incoming call is ringing, with the caller number in its `caller` attribute.
 
 The signal and network sensors are polled periodically; the call-state, incoming-call, and last-SMS sensors update as calls and messages come and go. All can be used in automations or dashboards to monitor modem health and activity.

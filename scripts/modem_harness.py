@@ -70,6 +70,38 @@ async def _run_monitor(modem: Modem, seconds: float) -> None:
             last = desc
 
 
+async def _run_record(modem: Modem, seconds: float) -> None:
+    """Wait for an incoming call, answer, record `seconds`, and save ./rec.amr."""
+    print(f"waiting for an incoming call to record ({seconds}s)...")
+    while True:
+        call = await modem.get_current_call()
+        if call is not None and call.is_incoming:
+            print(f"incoming call from {call.number}; answering")
+            break
+        await asyncio.sleep(1.0)
+
+    await modem.answer()
+    await modem.start_recording()
+    print(f"recording for {seconds}s...")
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        await asyncio.sleep(1.0)
+        if await modem.get_current_call() is None:
+            print("caller hung up")
+            break
+    await modem.stop_recording()
+
+    from modem.modem import _REC_PATH  # noqa: PLC0415 — local import keeps top clean
+
+    size = await modem.file_size(_REC_PATH)
+    print(f"recorded file size: {size} bytes")
+    data = await modem.read_file(_REC_PATH, size) if size > 0 else b""
+    await modem.hangup()
+    await modem.delete_file(_REC_PATH)
+    Path("rec.amr").write_bytes(data)
+    print(f"wrote ./rec.amr ({len(data)} bytes)")
+
+
 async def _run_sms_watch(modem: Modem, seconds: float, *, delete: bool) -> None:
     """Poll for unread SMS for `seconds`, printing (and optionally deleting) them."""
     print(f"watching for incoming SMS for {seconds}s (delete={delete})...")
@@ -99,6 +131,8 @@ async def main() -> int:
     call.add_argument("--ring", type=float, default=20.0)
     monitor = sub.add_parser("monitor")
     monitor.add_argument("--seconds", type=float, default=60.0)
+    record = sub.add_parser("record")
+    record.add_argument("--seconds", type=float, default=15.0)
     sms = sub.add_parser("sms")
     sms.add_argument("--seconds", type=float, default=60.0)
     sms.add_argument("--delete", action="store_true")
@@ -120,6 +154,8 @@ async def main() -> int:
             await _run_call(modem, args.number, args.ring)
         elif args.cmd == "monitor":
             await _run_monitor(modem, args.seconds)
+        elif args.cmd == "record":
+            await _run_record(modem, args.seconds)
         elif args.cmd == "sms":
             await _run_sms_watch(modem, args.seconds, delete=args.delete)
         elif args.cmd == "cnum":

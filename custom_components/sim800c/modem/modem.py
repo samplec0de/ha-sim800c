@@ -53,6 +53,17 @@ _CREC_CHANNEL_CALL = 0
 # Default playback volume (0-100) for AT+CREC.
 _CREC_DEFAULT_VOLUME = 90
 
+# --- Call recording (PROVISIONAL — verify on hardware) ---
+# Where the modem records the in-call audio before we read it back for STT.
+_REC_PATH = "C:\\User\\rec.amr"
+# AT+CREC record modes. PROVISIONAL — TODO(hw): verify on SIM800 R14.18.
+_CREC_RECORD_START = 1  # start recording the in-call audio to a file
+_CREC_RECORD_STOP = 2  # stop recording
+# Timeout for reading a recorded file back off the modem's flash.
+_FSREAD_TIMEOUT = 20.0
+# +FSFLSIZE: <n> — file size in bytes (reliable).
+_FSFLSIZE_RE = re.compile(r"\+FSFLSIZE:\s*(\d+)")
+
 # +CLCC <dir> field (3GPP TS 27.007)
 CALL_DIR_OUTGOING = 0  # mobile-originated
 CALL_DIR_INCOMING = 1  # mobile-terminated
@@ -252,6 +263,45 @@ class Modem:
         """Stop any in-progress playback (AT+CREC=5); best-effort."""
         with contextlib.suppress(ModemError):
             await self._transport.execute("AT+CREC=5")
+
+    # --- call recording (record the caller, read it back for STT) -------
+
+    async def answer(self) -> None:
+        """Answer an incoming call (ATA). Standard/confirmed."""
+        await self._transport.execute("ATA")
+
+    async def start_recording(self) -> None:
+        """Start recording the in-call audio to the modem's flash."""
+        # PROVISIONAL — TODO(hw): verify on SIM800 R14.18.
+        await self._transport.execute(f'AT+CREC={_CREC_RECORD_START},"{_REC_PATH}"')
+
+    async def stop_recording(self) -> None:
+        """Stop the in-call recording (best-effort)."""
+        # PROVISIONAL — TODO(hw): verify on SIM800 R14.18.
+        with contextlib.suppress(ModemError):
+            await self._transport.execute(f"AT+CREC={_CREC_RECORD_STOP}")
+
+    async def file_size(self, path: str) -> int:
+        """Return the size in bytes of a file on the modem's flash (AT+FSFLSIZE)."""
+        resp = await self._transport.execute(f"AT+FSFLSIZE={path}")
+        match = _FSFLSIZE_RE.search(resp)
+        if not match:
+            msg = f"No +FSFLSIZE for {path!r}, got {resp.strip()!r}"
+            raise ModemError(msg)
+        return int(match.group(1))
+
+    async def read_file(self, path: str, size: int) -> bytes:
+        """Read `size` bytes of a file off the modem's flash via AT+FSREAD."""
+        # PROVISIONAL framing — TODO(hw): verify on SIM800 R14.18.
+        command = f"AT+FSREAD={path},0,{size},0"
+        return await self._transport.read_file_bytes(
+            command, size, timeout=_FSREAD_TIMEOUT
+        )
+
+    async def delete_file(self, path: str) -> None:
+        """Delete a file on the modem's flash (AT+FSDEL); best-effort."""
+        with contextlib.suppress(ModemError):
+            await self._transport.execute(f"AT+FSDEL={path}")
 
 
 def _parse_cmgl(resp: str) -> list[SmsMessage]:

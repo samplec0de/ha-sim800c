@@ -42,6 +42,11 @@ class FakeModem:
         self.play_volume: int | None = None
         self.stopped = False
         self.order: list[str] = []
+        self.answered = False
+        self.recording_started = False
+        self.recording_stopped = False
+        self.deleted_files: list[str] = []
+        self.file_bytes = b""
 
     async def dial(self, number: str) -> None:
         """Record the dialed number."""
@@ -83,6 +88,38 @@ class FakeModem:
     async def delete_sms(self, index: int) -> None:
         """Record the deleted message index."""
         self.deleted.append(index)
+
+    async def answer(self) -> None:
+        """Record that the incoming call was answered."""
+        self.answered = True
+        self.order.append("answer")
+
+    async def start_recording(self) -> None:
+        """Record that in-call recording started."""
+        self.recording_started = True
+        self.order.append("start_recording")
+
+    async def stop_recording(self) -> None:
+        """Record that in-call recording stopped."""
+        self.recording_stopped = True
+        self.order.append("stop_recording")
+
+    async def file_size(self, path: str) -> int:
+        """Return the size of the canned recording payload."""
+        self.order.append("file_size")
+        _ = path
+        return len(self.file_bytes)
+
+    async def read_file(self, path: str, size: int) -> bytes:
+        """Return the canned recording payload."""
+        self.order.append("read_file")
+        _ = (path, size)
+        return self.file_bytes
+
+    async def delete_file(self, path: str) -> None:
+        """Record the deleted file path."""
+        self.deleted_files.append(path)
+        self.order.append("delete_file")
 
 
 def make_hub(**kwargs: object) -> ModemHub:
@@ -273,6 +310,61 @@ async def test_last_caller_not_overwritten_by_unknown_number():
     assert hub.incoming_number is None
     # A None-number call must not clobber the known last_caller.
     assert hub.last_caller == "+79990001122"
+
+
+async def test_answer_and_record_returns_bytes_and_runs_sequence():
+    hub = make_hub()
+    fake = FakeModem(
+        [
+            CallInfo(CALL_DIR_INCOMING, CALL_STAT_INCOMING, "+79990001122"),
+            # Caller drops after being answered, ending recording early.
+            None,
+        ]
+    )
+    fake.file_bytes = b"AMRDATA"
+    hub._modem = fake  # noqa: SLF001
+
+    data = await hub.async_answer_and_record(record_seconds=5)
+
+    assert data == b"AMRDATA"
+    assert fake.answered is True
+    assert fake.recording_started is True
+    assert fake.recording_stopped is True
+    assert fake.hung_up is True
+    # answer -> start_recording -> ... -> stop_recording -> read -> delete.
+    assert fake.order[:2] == ["answer", "start_recording"]
+    assert "stop_recording" in fake.order
+    assert fake.order.index("file_size") < fake.order.index("read_file")
+    assert fake.deleted_files == ["C:\\User\\rec.amr"]
+    assert hub.call_state == CALL_STATE_IDLE
+
+
+async def test_answer_and_record_returns_none_when_no_incoming_call():
+    hub = make_hub()
+    fake = FakeModem([None])
+    hub._modem = fake  # noqa: SLF001
+
+    result = await hub.async_answer_and_record(record_seconds=5)
+
+    assert result is None
+    assert fake.answered is False
+    assert fake.recording_started is False
+
+
+async def test_answer_and_record_returns_none_when_recording_empty():
+    hub = make_hub()
+    fake = FakeModem(
+        [CallInfo(CALL_DIR_INCOMING, CALL_STAT_INCOMING, "+79990001122"), None]
+    )
+    fake.file_bytes = b""  # empty recording
+    hub._modem = fake  # noqa: SLF001
+
+    result = await hub.async_answer_and_record(record_seconds=5)
+
+    assert result is None
+    assert fake.answered is True
+    assert "read_file" not in fake.order  # never read a zero-byte file
+    assert fake.deleted_files == ["C:\\User\\rec.amr"]
 
 
 def test_outgoing_state_mapping():
