@@ -370,12 +370,12 @@ async def test_answer_sends_ata():
     assert b"ATA\r\n" in b"".join(fake.written)
 
 
-async def test_start_recording_sends_provisional_crec():
+async def test_start_recording_sends_crec_with_channel():
     modem, transport, fake = make_modem([("AT\\+CREC=1", b"\r\nOK\r\n")])
     await transport.connect()
     await modem.start_recording()
-    # PROVISIONAL string — kept in sync with _REC_PATH / _CREC_RECORD_START.
-    assert b'AT+CREC=1,"C:\\User\\rec.amr"\r\n' in b"".join(fake.written)
+    # The trailing ,0 channel arg is required (verified on hardware).
+    assert b'AT+CREC=1,"C:\\User\\rec.amr",0\r\n' in b"".join(fake.written)
 
 
 async def test_stop_recording_sends_provisional_crec():
@@ -421,9 +421,8 @@ async def test_delete_file_tolerates_error():
 
 
 async def test_read_file_extracts_payload_before_ok():
-    # PROVISIONAL FSREAD framing — TODO(hw): verify on SIM800 R14.18.
     # Modem frames the raw bytes then a trailing OK; read_file returns the
-    # `size` bytes immediately before that OK.
+    # `size` bytes immediately before that OK (single chunk here).
     modem, transport, _ = make_modem([("AT\\+FSREAD", b"\r\nHELLO\r\nOK\r\n")])
     await transport.connect()
     assert await modem.read_file("C:\\User\\rec.amr", 5) == b"HELLO"

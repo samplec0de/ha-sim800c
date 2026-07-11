@@ -282,6 +282,14 @@ class ModemHub:
                 return None
 
             await self._modem.answer()
+            # Confirm the call actually connected (stat=active) before recording;
+            # otherwise we would record ringback / a network announcement.
+            if not await self._await_active():
+                LOGGER.warning("Call did not become active after answering")
+                await self._safe_hangup()
+                async with self._state_lock:
+                    self._apply_call(None)
+                return None
             LOGGER.info(
                 "Answered call from %s; recording up to %ss",
                 call.number or "unknown",
@@ -306,6 +314,22 @@ class ModemHub:
                 self._apply_call(None)
             await self._modem.delete_file(_REC_PATH)
             return data
+
+    async def _await_active(
+        self,
+        timeout: float = 6.0,  # noqa: ASYNC109 — polling budget, not a cancellation timeout
+    ) -> bool:
+        """Poll until the current call is answered (active), or time out."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            await asyncio.sleep(_CALL_POLL_INTERVAL)
+            call = await self._refresh_call_state()
+            if call is None:
+                return False  # caller gave up before we connected
+            if call.is_answered:
+                return True
+        return False
 
     async def _read_recording(self) -> bytes | None:
         """Read the just-recorded file off the modem, or None if empty/failed."""

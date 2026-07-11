@@ -317,7 +317,8 @@ async def test_answer_and_record_returns_bytes_and_runs_sequence():
     fake = FakeModem(
         [
             CallInfo(CALL_DIR_INCOMING, CALL_STAT_INCOMING, "+79990001122"),
-            # Caller drops after being answered, ending recording early.
+            # Becomes active once answered, then the caller drops (ends recording).
+            CallInfo(CALL_DIR_INCOMING, CALL_STAT_ACTIVE, "+79990001122"),
             None,
         ]
     )
@@ -354,7 +355,11 @@ async def test_answer_and_record_returns_none_when_no_incoming_call():
 async def test_answer_and_record_returns_none_when_recording_empty():
     hub = make_hub()
     fake = FakeModem(
-        [CallInfo(CALL_DIR_INCOMING, CALL_STAT_INCOMING, "+79990001122"), None]
+        [
+            CallInfo(CALL_DIR_INCOMING, CALL_STAT_INCOMING, "+79990001122"),
+            CallInfo(CALL_DIR_INCOMING, CALL_STAT_ACTIVE, "+79990001122"),
+            None,
+        ]
     )
     fake.file_bytes = b""  # empty recording
     hub._modem = fake  # noqa: SLF001

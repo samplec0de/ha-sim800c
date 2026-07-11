@@ -1,49 +1,36 @@
-# SIM800C Integration v0.6.0 🔊
+# SIM800C Integration v0.7.0 🎙️
 
-Play a pre-made audio clip **into a voice call** so the person you call hears it.
+Answer an incoming call, **record what the caller says, and transcribe it** with a local speech-to-text service — all on the SIM800C.
 
 ## ✨ What's New
 
-- 🔊 **`sim800c.call_and_play`** — place a call and play an **AMR-NB** audio clip into it, so the **callee hears your message**, then hang up automatically. Perfect for spoken alerts ("Water leak detected at home") to a phone that has no smart-home app.
+- 🎙️ **`sim800c.answer_and_record`** — answers a **ringing incoming call**, records the caller for `record_seconds` (1–60, default 15), hangs up, saves the recording under `<config>/media/sim800c/`, and transcribes it via a local **Whisper-compatible** STT service (e.g. [GigaAM](https://github.com/salute-developers/GigaAM)). Returns `{"recorded", "transcript", "path"}`.
+- 📝 **`sensor.sim800c_last_recording`** — transcript of the most recent recorded call (attributes: `caller`, `path`, `url`, `transcript`, `timestamp`).
+- 📣 **`sim800c_call_recorded`** event with the same fields.
 
 ```yaml
 automation:
-  - alias: "Voice-call alert on a water leak"
+  - alias: "Transcribe and notify on an incoming call"
     triggers:
-      - trigger: state
-        entity_id: binary_sensor.water_leak
-        to: "on"
+      - trigger: event
+        event_type: sim800c_incoming_call
     actions:
-      - action: sim800c.call_and_play
+      - action: sim800c.answer_and_record
         data:
-          target: "+79990001122"
-          audio_file: "/media/sim800c/alert.amr"
-          duration: 5          # optional: known clip length in seconds
-          ring_duration: 30     # optional: seconds to ring before giving up
-          volume: 90            # optional: 0-100
-        response_variable: result
-      - if: "{{ not result.answered }}"
-        then:
-          - action: sim800c.send_sms
-            data:
-              target: "+79990001122"
-              message: "⚠️ Water leak at home (call went unanswered)."
+          record_seconds: 15
+          stt_url: "http://192.168.1.10:9000/v1"   # your STT host's LAN IP
+        response_variable: rec
+      - action: notify.mobile_app_phone
+        data:
+          message: "Call from {{ rec.caller if rec.caller else 'unknown' }}: {{ rec.transcript }}"
 ```
 
-The service returns `{"answered": <bool>, "played": <bool>}`.
+Verified end-to-end on real hardware (SIM800 R14.18 → GigaAM v3): the caller's speech was recorded and transcribed correctly.
 
-## 🎧 Audio format
-
-The clip **must be AMR-NB (8 kHz, mono)** — the format the SIM800C plays natively.
-Convert an existing WAV/MP3 with `ffmpeg` (built with an opencore-amr encoder):
-
-```bash
-ffmpeg -i input.wav -ar 8000 -ac 1 -c:a libopencore_amrnb -b:a 12.2k alert.amr
-```
-
-You can generate the source audio with any TTS engine first, then convert it.
-Place the resulting `.amr` under a Home Assistant allowlisted directory (e.g.
-`/media/`) so the service can read it.
+## ⚠️ Notes
+- If the STT service is unreachable the recording is still saved and returned; only the transcript is `null` (a warning is logged).
+- **STT URL on Home Assistant OS:** the default `http://127.0.0.1:9000/v1` points at the HA container itself. On HAOS, set your STT host's **LAN IP** via the `stt_url` field.
+- The integration answers the call to record it (there is an audio path only once connected).
 
 ## 📦 Installation / Upgrade
 

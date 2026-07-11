@@ -13,8 +13,6 @@ ignore = [
     "D212", # multi-line-summary-first-line (incompatible with formatter)
     "COM812", # incompatible with formatter
     "ISC001", # incompatible with formatter
-    "TD003", # provisional hardware AT-command markers carry no issue link
-    "FIX002", # TODO(hw) markers are intentional; verified against real hardware
 ]
 
 [lint.per-file-ignores]

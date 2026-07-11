@@ -53,14 +53,21 @@ _CREC_CHANNEL_CALL = 0
 # Default playback volume (0-100) for AT+CREC.
 _CREC_DEFAULT_VOLUME = 90
 
-# --- Call recording (PROVISIONAL — verify on hardware) ---
+# --- Call recording (verified on SIM800 R14.18 hardware) ---
 # Where the modem records the in-call audio before we read it back for STT.
 _REC_PATH = "C:\\User\\rec.amr"
-# AT+CREC record modes. PROVISIONAL — TODO(hw): verify on SIM800 R14.18.
+# AT+CREC record modes.
 _CREC_RECORD_START = 1  # start recording the in-call audio to a file
 _CREC_RECORD_STOP = 2  # stop recording
+# AT+CREC record channel argument (0). Required — omitting it returns ERROR.
+_CREC_RECORD_CHANNEL = 0
 # Timeout for reading a recorded file back off the modem's flash.
 _FSREAD_TIMEOUT = 20.0
+# Max bytes per AT+FSREAD: this firmware rejects a single read of a large file,
+# so the file is read in chunks (mode 0 first, then mode 1 = continue).
+_FSREAD_CHUNK = 4096
+_FSREAD_MODE_START = 0
+_FSREAD_MODE_CONTINUE = 1
 # +FSFLSIZE: <n> — file size in bytes (reliable).
 _FSFLSIZE_RE = re.compile(r"\+FSFLSIZE:\s*(\d+)")
 
@@ -267,17 +274,22 @@ class Modem:
     # --- call recording (record the caller, read it back for STT) -------
 
     async def answer(self) -> None:
-        """Answer an incoming call (ATA). Standard/confirmed."""
+        """Answer an incoming call (ATA), disabling DTR-triggered hang-up first."""
+        # AT+CVHU=0 keeps the call up regardless of DTR; some setups drop the
+        # call on answer without it. Best-effort.
+        with contextlib.suppress(ModemError):
+            await self._transport.execute("AT+CVHU=0")
         await self._transport.execute("ATA")
 
     async def start_recording(self) -> None:
         """Start recording the in-call audio to the modem's flash."""
-        # PROVISIONAL — TODO(hw): verify on SIM800 R14.18.
-        await self._transport.execute(f'AT+CREC={_CREC_RECORD_START},"{_REC_PATH}"')
+        # The channel argument (0) is required — without it CREC returns ERROR.
+        await self._transport.execute(
+            f'AT+CREC={_CREC_RECORD_START},"{_REC_PATH}",{_CREC_RECORD_CHANNEL}'
+        )
 
     async def stop_recording(self) -> None:
         """Stop the in-call recording (best-effort)."""
-        # PROVISIONAL — TODO(hw): verify on SIM800 R14.18.
         with contextlib.suppress(ModemError):
             await self._transport.execute(f"AT+CREC={_CREC_RECORD_STOP}")
 
@@ -291,12 +303,25 @@ class Modem:
         return int(match.group(1))
 
     async def read_file(self, path: str, size: int) -> bytes:
-        """Read `size` bytes of a file off the modem's flash via AT+FSREAD."""
-        # PROVISIONAL framing — TODO(hw): verify on SIM800 R14.18.
-        command = f"AT+FSREAD={path},0,{size},0"
-        return await self._transport.read_file_bytes(
-            command, size, timeout=_FSREAD_TIMEOUT
-        )
+        """
+        Read `size` bytes of a file off the modem's flash via AT+FSREAD.
+
+        The firmware caps a single read, so the file is fetched in <=4096-byte
+        chunks: mode 0 for the first chunk, then mode 1 (continue) for the rest.
+        """
+        data = bytearray()
+        mode = _FSREAD_MODE_START
+        remaining = size
+        while remaining > 0:
+            length = min(_FSREAD_CHUNK, remaining)
+            data.extend(
+                await self._transport.read_fsread_chunk(
+                    path, mode, length, timeout=_FSREAD_TIMEOUT
+                )
+            )
+            remaining -= length
+            mode = _FSREAD_MODE_CONTINUE
+        return bytes(data)
 
     async def delete_file(self, path: str) -> None:
         """Delete a file on the modem's flash (AT+FSDEL); best-effort."""

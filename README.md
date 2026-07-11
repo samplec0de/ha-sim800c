@@ -10,7 +10,7 @@ Supports **SMS** (send and receive) and **voice calls** (ring alerts / missed-ca
 - Receive SMS: `sensor.sim800c_last_sms` and the `sim800c_incoming_sms` event, with automatic GSM/UCS2 decoding
 - Place voice calls via the `sim800c.call` service, with automatic hang-up and answered/no-answer reporting (no audio is played)
 - Play a pre-made **AMR-NB** audio clip into a call via the `sim800c.call_and_play` service, so the callee hears it, with automatic hang-up
-- Answer a ringing call, record the caller, and **transcribe** it via a local Whisper-compatible STT service (GigaAM) with the `sim800c.answer_and_record` service; result exposed via `sensor.sim800c_last_recording` and the `sim800c_call_recorded` event _(draft — provisional AT commands, pending hardware verification)_
+- Answer a ringing call, record the caller, and **transcribe** it via a local Whisper-compatible STT service (GigaAM) with the `sim800c.answer_and_record` service; result exposed via `sensor.sim800c_last_recording` and the `sim800c_call_recorded` event
 - Hang up an active call via the `sim800c.hang_up` service
 - Detect incoming calls via `binary_sensor.sim800c_incoming_call` (with caller number) and the `sim800c_incoming_call` event
 - Live call state via `sensor.sim800c_call_state` (`idle` / `dialing` / `ringing` / `active` / `incoming`)
@@ -269,9 +269,6 @@ service: sim800c.hang_up
 
 ### Answering and Recording a Call (with transcription)
 
-> **Draft feature.** The record/read AT commands are **provisional** and pending
-> verification against real SIM800C hardware. The service and its wiring are in
-> place, but the exact AT strings may change after a hardware test.
 
 `sim800c.answer_and_record` answers a **ringing incoming call**, records what the
 caller says to the modem's flash, hangs up, then transcribes the recording via a

@@ -103,22 +103,25 @@ class Transport:
             await txn.send_line(command)
             return await txn.read_until(expect, error_tokens, timeout)
 
-    async def read_file_bytes(
+    async def read_fsread_chunk(
         self,
-        command: str,
-        size: int,
+        path: str,
+        mode: int,
+        length: int,
         timeout: float = 15.0,  # noqa: ASYNC109 — intentional API, not a cancellation timeout
     ) -> bytes:
         """
-        Send `command` and read back a binary payload of `size` bytes.
+        Read one AT+FSREAD chunk of `length` bytes and return the raw payload.
 
-        Used for AT+FSREAD, whose response frames the raw file bytes between a
-        header and a trailing OK. Runs the blocking read in a worker thread and
-        holds the port lock for the whole exchange, like execute().
+        `mode` is 0 to read from the start of the file or 1 to continue from the
+        previous read. The response frames the `length` payload bytes between a
+        leading CRLF and a trailing CRLF+OK; those are stripped. Runs the
+        blocking read in a worker thread, holding the port lock for the exchange.
         """
+        command = f"AT+FSREAD={path},{mode},{length},0"
         async with self._lock:
             return await asyncio.to_thread(
-                self._read_file_bytes_sync, command, size, timeout
+                self._read_file_bytes_sync, command, length, timeout
             )
 
     # --- synchronous helpers (run in a worker thread) ---
@@ -155,10 +158,9 @@ class Transport:
         self._serial.flush()
         buffer = bytearray()
         deadline = time.monotonic() + timeout
-        # TODO(hw): verify on SIM800 R14.18 — the exact FSREAD framing (any
-        # header line before the payload, and the trailing OK) is provisional.
-        # We read until we have at least `size` bytes plus an OK, then treat the
-        # `size` bytes immediately before the trailing OK as the file payload.
+        # AT+FSREAD frames the chunk as: <CRLF><payload><CRLF>OK<CRLF>. Read
+        # until at least `size` payload bytes plus the trailing OK have arrived,
+        # then take the `size` bytes immediately before OK as the payload.
         while time.monotonic() < deadline:
             waiting = self._serial.in_waiting
             if waiting:

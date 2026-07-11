@@ -5,18 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-07-11
 
-### Added (draft — pending hardware verification)
-- `sim800c.answer_and_record` service: answer a **ringing incoming call**, record what the caller says, hang up, then transcribe the recording via a local **Whisper-compatible** STT service (GigaAM). Returns `{"recorded": bool, "transcript": str | None, "path": str | None}`. Fields: optional `record_seconds` (1–60, default 15) and optional `stt_url` override. The recording is saved under `<config>/media/sim800c/rec_<epoch>.amr`; a STT failure still returns the recording (transcript `None`).
+### Added
+- `sim800c.answer_and_record` service: answer a **ringing incoming call**, record what the caller says, hang up, then transcribe the recording via a local **Whisper-compatible** STT service (e.g. GigaAM). Returns `{"recorded": bool, "transcript": str | None, "path": str | None}`. Fields: optional `record_seconds` (1–60, default 15) and optional `stt_url` override. The recording is saved under `<config>/media/sim800c/rec_<epoch>.amr`; a STT failure still returns the recording (transcript `None`). Verified end-to-end on real hardware (SIM800 R14.18 → GigaAM v3).
 - `sensor.sim800c_last_recording`: transcript of the most recent recorded call, with `caller`, `path`, `url`, `transcript`, and `timestamp` attributes.
 - `sim800c_call_recorded` event, fired with `{"caller", "path", "url", "transcript", "timestamp"}`.
-- Modem layer: `Modem.answer()` (`ATA`), `Modem.start_recording()` / `Modem.stop_recording()` (`AT+CREC` record modes), `Modem.file_size()` (`AT+FSFLSIZE`), `Modem.read_file()` (`AT+FSREAD`), and `Modem.delete_file()` (`AT+FSDEL`); `Transport.read_file_bytes()` for reading a binary payload off the port.
+- Modem layer: `Modem.answer()` (`AT+CVHU=0` then `ATA`), `Modem.start_recording()` / `Modem.stop_recording()` (`AT+CREC=1,"<file>",0` / `AT+CREC=2`), `Modem.file_size()` (`AT+FSFLSIZE`), `Modem.read_file()` (chunked `AT+FSREAD` — the firmware caps a single read, so files are fetched in 4 KB chunks: mode 0, then mode 1 continue), and `Modem.delete_file()` (`AT+FSDEL`).
 - New `stt.py` module (HA layer): a Whisper-compatible transcription client.
 - Harness: `record` subcommand in `scripts/modem_harness.py` (answer, record N seconds, read the file, save `./rec.amr`).
 
 ### Notes
-- **PROVISIONAL AT commands.** The record (`AT+CREC=1,"C:\User\rec.amr"` / `AT+CREC=2`) and file-read (`AT+FSREAD=<path>,0,<size>,0`) strings and the FSREAD response framing are **not yet verified on hardware** — they are marked `# TODO(hw): verify on SIM800 R14.18` and kept as single constants in `modem/modem.py` / `modem/transport.py` for easy adjustment. `AT+FSFLSIZE` (file size) and `ATA` (answer) are reliable.
+- Transcription requires a reachable Whisper-compatible STT service; set `stt_url` to its LAN IP on Home Assistant OS (the default `127.0.0.1` points at the HA container). Without STT the recording is still saved and returned.
 
 ## [0.6.0] - 2026-07-11
 
