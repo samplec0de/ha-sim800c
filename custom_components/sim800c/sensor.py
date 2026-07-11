@@ -57,6 +57,7 @@ async def async_setup_entry(
             NetworkSensor(hub, entry.entry_id),
             CallStateSensor(hub, entry.entry_id),
             LastSmsSensor(hub, entry.entry_id),
+            LastSmsSenderSensor(hub, entry.entry_id),
             LastCallerSensor(hub, entry.entry_id),
             LastRecordingSensor(hub, entry.entry_id),
         ]
@@ -239,6 +240,39 @@ class LastCallerSensor(SensorEntity):
     def native_value(self) -> str | None:
         """Return the number of the last person who called."""
         return self._hub.last_caller
+
+
+class LastSmsSenderSensor(SensorEntity):
+    """Number of the most recent SMS sender, persisted across messages."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Last SMS sender"
+    _attr_should_poll = False
+    _attr_icon = "mdi:message-arrow-left"
+
+    def __init__(self, hub: ModemHub, entry_id: str) -> None:
+        """Bind the sensor to its owning modem hub and config entry."""
+        self._hub = hub
+        self._attr_unique_id = f"{entry_id}_last_sms_sender"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="SIM800C",
+            manufacturer="SIMCom",
+            model="SIM800C",
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to updates pushed by the hub when an SMS arrives."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_UPDATE, self.async_write_ha_state
+            )
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the number of the last person who sent an SMS."""
+        return self._hub.last_sms.sender if self._hub.last_sms else None
 
 
 class LastRecordingSensor(SensorEntity):
