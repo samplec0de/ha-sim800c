@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import re
 from dataclasses import dataclass
@@ -32,6 +33,21 @@ _UCS2_HEX_QUANTUM = 4  # one UCS2 code unit is 4 hex digits
 # CSMP: fo=17, vp=167, pid=0, dcs=0 (GSM7) or dcs=8 (UCS2)
 _CSMP_GSM = "AT+CSMP=17,167,0,0"
 _CSMP_UCS2 = "AT+CSMP=17,167,0,8"
+
+# The network routinely needs 15-25 s to accept a multi-part UCS2 message.
+# Timing out earlier leaves the modem in text-entry mode, where it swallows
+# every subsequent AT command until it is power-cycled.
+_CMGS_TIMEOUT = 60.0
+_ESC = b"\x1b"  # aborts an unfinished AT+CMGS text entry
+
+# Radio-stack recovery. A SIM800C that has been de-registered by the network
+# can settle into CREG stat=0 ("not registered, not searching") and stay there
+# indefinitely: AT+COPS=0 answers ERROR and only a full radio cycle re-attaches
+# it. These bound that cycle.
+_CFUN_SETTLE = 3.0  # seconds to stay powered down before switching back on
+_REG_POLL_INTERVAL = 5.0  # how often to re-read AT+CREG? while re-attaching
+_REG_TIMEOUT = 90.0  # give up waiting for registration after this long
+_CFUN_TIMEOUT = 30.0  # AT+CFUN itself is slow; the URC burst follows it
 
 # +CLCC: <id>,<dir>,<stat>,<mode>,<mpty>[,"<number>",<type>[,"<alpha>"]]
 _CLCC_RE = re.compile(
@@ -157,6 +173,29 @@ class Modem:
         match = _CREG_RE.search(resp)
         return bool(match) and int(match.group(1)) in _REGISTERED_STATS
 
+    async def reset_radio(self) -> bool:
+        """
+        Power-cycle the radio (AT+CFUN=0/1) and wait for it to re-register.
+
+        Returns True once the modem reports registration, False if it has not
+        re-attached within `_REG_TIMEOUT`. The cycle resets the modem's
+        settings, so a successful recovery re-runs `initialize()`.
+        """
+        await self._transport.execute("AT+CFUN=0", timeout=_CFUN_TIMEOUT)
+        await asyncio.sleep(_CFUN_SETTLE)
+        await self._transport.execute("AT+CFUN=1", timeout=_CFUN_TIMEOUT)
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _REG_TIMEOUT
+        while loop.time() < deadline:
+            await asyncio.sleep(_REG_POLL_INTERVAL)
+            with contextlib.suppress(ModemError):
+                if await self.get_registration():
+                    # The radio cycle wiped text mode and caller-ID reporting.
+                    await self.initialize()
+                    return True
+        return False
+
     async def send_sms(
         self,
         number: str,
@@ -185,10 +224,15 @@ class Modem:
 
         try:
             async with self._transport.transaction() as txn:
-                await txn.send_line(f'AT+CMGS="{address}"')
-                await txn.read_until((">",), timeout=5.0)
-                await txn.write_raw(body + b"\x1a")
-                final = await txn.read_until(("+CMGS",), timeout=15.0)
+                try:
+                    await txn.send_line(f'AT+CMGS="{address}"')
+                    await txn.read_until((">",), timeout=5.0)
+                    await txn.write_raw(body + b"\x1a")
+                    final = await txn.read_until(("+CMGS",), timeout=_CMGS_TIMEOUT)
+                except ModemError:
+                    with contextlib.suppress(Exception):
+                        await txn.write_raw(_ESC)
+                    raise
         except ModemError as err:
             raise SmsSendError(str(err)) from err
 

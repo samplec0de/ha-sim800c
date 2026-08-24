@@ -1,5 +1,6 @@
 import pytest
 
+from custom_components.sim800c.modem import modem as modem_mod
 from custom_components.sim800c.modem.errors import (
     ModemError,
     ModemTimeout,
@@ -440,3 +441,46 @@ async def test_initialize_enables_csdh():
     await transport.connect()
     await modem.initialize()
     assert b"AT+CSDH=1\r\n" in b"".join(fake.written)
+
+
+async def test_reset_radio_cycles_cfun_and_reinitializes(monkeypatch):
+    monkeypatch.setattr(modem_mod, "_CFUN_SETTLE", 0.01)
+    monkeypatch.setattr(modem_mod, "_REG_POLL_INTERVAL", 0.01)
+    modem, transport, fake = make_modem(
+        [
+            ("AT\\+CFUN=0", b"\r\nOK\r\n"),
+            ("AT\\+CFUN=1", b"\r\nOK\r\n"),
+            ("AT\\+CREG\\?", b"\r\n+CREG: 0,1\r\n\r\nOK\r\n"),
+            ("ATE0", b"\r\nOK\r\n"),
+            ("AT\\+CMGF=1", b"\r\nOK\r\n"),
+            ("AT\\+CLIP=1", b"\r\nOK\r\n"),
+            ("AT\\+CSDH=1", b"\r\nOK\r\n"),
+        ]
+    )
+    await transport.connect()
+
+    assert await modem.reset_radio() is True
+
+    sent = [line.decode("utf-8", "ignore").strip() for line in fake.written]
+    assert sent.index("AT+CFUN=0") < sent.index("AT+CFUN=1")
+    # The radio cycle wipes text mode, so the modem must be re-initialized.
+    assert sent.index("AT+CFUN=1") < sent.index("AT+CMGF=1")
+
+
+async def test_reset_radio_returns_false_when_registration_never_returns(monkeypatch):
+    monkeypatch.setattr(modem_mod, "_CFUN_SETTLE", 0.01)
+    monkeypatch.setattr(modem_mod, "_REG_POLL_INTERVAL", 0.01)
+    monkeypatch.setattr(modem_mod, "_REG_TIMEOUT", 0.05)
+    modem, transport, fake = make_modem(
+        [
+            ("AT\\+CFUN=0", b"\r\nOK\r\n"),
+            ("AT\\+CFUN=1", b"\r\nOK\r\n"),
+            ("AT\\+CREG\\?", b"\r\n+CREG: 0,0\r\n\r\nOK\r\n"),
+        ]
+    )
+    await transport.connect()
+
+    assert await modem.reset_radio() is False
+    sent = [line.decode("utf-8", "ignore").strip() for line in fake.written]
+    # A failed recovery must not leave the modem re-initialized-looking.
+    assert "AT+CMGF=1" not in sent

@@ -19,6 +19,7 @@ Supports **SMS** (send and receive) and **voice calls** (ring alerts / missed-ca
 - Full Unicode support (Cyrillic, Chinese, Arabic, etc.) with automatic GSM 7-bit / UCS2 encoding
 - UI-based setup via config flow (no YAML editing required)
 - Diagnostic sensors for signal strength and network registration
+- Automatic recovery from a wedged radio: if the modem stays unregistered, the integration power-cycles the radio (`AT+CFUN=0/1`) and re-attaches to the network
 - Serialized modem access, so SMS sends and calls never race on the serial port
 - Works with SIM800C GSM modules connected via USB or serial
 
@@ -524,13 +525,25 @@ automation:
 The integration exposes two diagnostic sensors per configured modem:
 
 - `sensor.sim800c_signal` — signal strength in dBm.
-- `sensor.sim800c_network` — network registration state (`registered` or `searching`).
+- `sensor.sim800c_network` — network registration state (`registered` or `searching`), re-read once a minute.
 - `sensor.sim800c_call_state` — current call state (`idle` / `dialing` / `ringing` / `active` / `incoming`), updated live.
 - `sensor.sim800c_last_sms` — text of the most recently received SMS, with `sender`, `text`, and `timestamp` attributes.
 - `sensor.sim800c_last_sms_sender` — number of the most recent SMS sender (the `sender` as the sensor's state, mirroring `sensor.sim800c_last_caller`), persisted until the next message.
 - `sensor.sim800c_last_caller` — number of the most recent incoming caller. Unlike the binary sensor's `caller` attribute (which clears when the call ends), this value persists after the call is over, so a missed call's number stays available.
 - `sensor.sim800c_last_recording` — transcript of the most recently recorded call (via `sim800c.answer_and_record`), with `caller`, `path`, `url`, `transcript`, and `timestamp` attributes.
 - `binary_sensor.sim800c_incoming_call` — `on` while an incoming call is ringing, with the caller number in its `caller` attribute.
+
+### Automatic registration recovery
+
+A SIM800C that the network de-registers can settle into `AT+CREG?` state `0` — *not registered, not searching* — and stay there indefinitely, with a perfectly healthy signal reading. `AT+COPS=0` answers `ERROR` in that state; only a radio power-cycle re-attaches the module.
+
+The integration watches for this:
+
+- registration is re-read every minute by the background monitor;
+- if it stays down for **10 minutes**, the radio is cycled (`AT+CFUN=0` → `AT+CFUN=1`) and the modem is given up to 90 seconds to re-register. A successful cycle re-runs the modem initialization, since `AT+CFUN` resets text mode and caller-ID reporting;
+- cycles are spaced at least **30 minutes** apart, so a modem with no coverage is not power-cycled in a loop, and are skipped entirely while a call is in progress;
+- `sim800c.send_sms` also triggers one recovery attempt if the modem reports itself unregistered, then retries the message once.
+
 
 The signal and network sensors are polled periodically; the call-state, incoming-call, and last-SMS sensors update as calls and messages come and go. All can be used in automations or dashboards to monitor modem health and activity.
 
