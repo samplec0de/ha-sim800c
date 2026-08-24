@@ -40,6 +40,14 @@ _MONITOR_INTERVAL = 3.0
 _SMS_POLL_EVERY = 3
 # Faster polling while we are actively driving an outgoing call.
 _CALL_POLL_INTERVAL = 1.0
+# Check AT+CREG? every Nth monitor tick (~60s at the default interval).
+_REG_POLL_EVERY = 20
+# How long the modem may stay unregistered before the radio is cycled. Short
+# drop-outs recover on their own; only a persistent one is a wedged radio.
+_REG_GRACE = 600.0
+# Minimum spacing between radio cycles, so a modem with no coverage at all is
+# not power-cycled in a loop.
+_RECOVERY_COOLDOWN = 1800.0
 # Default seconds to let an outgoing call ring before auto-hanging-up.
 DEFAULT_RING_DURATION = 30.0
 # Default playback volume (0-100) for call_and_play.
@@ -90,6 +98,9 @@ class ModemHub:
         self._state_lock = asyncio.Lock()
         self._sms_lock = asyncio.Lock()
         self._monitor_task: asyncio.Task[None] | None = None
+        self._recovery_lock = asyncio.Lock()
+        self._unregistered_since: float | None = None
+        self._last_recovery: float | None = None
         self._on_state_change = on_state_change
         self._on_incoming_call = on_incoming_call
         self._on_incoming_sms = on_incoming_sms
@@ -118,6 +129,73 @@ class ModemHub:
         """Refresh cached registration and signal-strength state."""
         self.registered = await self._modem.get_registration()
         self.signal_dbm = await self._modem.get_signal()
+
+    # --- network registration -------------------------------------------
+
+    async def async_check_registration(self) -> None:
+        """
+        Re-read registration and cycle the radio if it has been down too long.
+
+        The modem can settle into "not registered, not searching" and stay
+        there until the radio is power-cycled, so a registration that stays
+        down for `_REG_GRACE` triggers `async_recover_registration`.
+        """
+        was_registered = self.registered
+        self.registered = await self._modem.get_registration()
+        if self.registered != was_registered and self._on_state_change:
+            self._on_state_change()
+
+        if self.registered:
+            self._unregistered_since = None
+            return
+
+        loop = asyncio.get_running_loop()
+        if self._unregistered_since is None:
+            self._unregistered_since = loop.time()
+            return
+        if loop.time() - self._unregistered_since < _REG_GRACE:
+            return
+        await self.async_recover_registration()
+
+    async def async_recover_registration(self) -> bool:
+        """
+        Cycle the radio to re-attach to the network, honouring the cooldown.
+
+        Returns True if the modem is registered afterwards. Does nothing (and
+        returns the current registration state) while a call is in progress or
+        while the cooldown since the last cycle has not elapsed.
+        """
+        if self._call_lock.locked():
+            LOGGER.debug("Skipping radio recovery: a call is in progress")
+            return self.registered
+
+        async with self._recovery_lock:
+            loop = asyncio.get_running_loop()
+            if (
+                self._last_recovery is not None
+                and loop.time() - self._last_recovery < _RECOVERY_COOLDOWN
+            ):
+                LOGGER.debug("Skipping radio recovery: still within the cooldown")
+                return self.registered
+
+            self._last_recovery = loop.time()
+            LOGGER.warning(
+                "Modem unregistered for too long; cycling the radio (AT+CFUN=0/1)"
+            )
+            try:
+                self.registered = await self._modem.reset_radio()
+            except ModemError as err:
+                LOGGER.warning("Radio recovery failed: %s", err)
+                self.registered = False
+            else:
+                if self.registered:
+                    self._unregistered_since = None
+                    LOGGER.info("Modem re-registered on the network")
+                else:
+                    LOGGER.warning("Modem did not re-register after the radio cycle")
+            if self._on_state_change:
+                self._on_state_change()
+            return self.registered
 
     # --- outgoing calls -------------------------------------------------
 
@@ -368,6 +446,12 @@ class ModemHub:
                 except ModemError as err:
                     LOGGER.debug("SMS poll failed: %s", err)
 
+            if ticks % _REG_POLL_EVERY == 0:
+                try:
+                    await self.async_check_registration()
+                except ModemError as err:
+                    LOGGER.debug("Registration poll failed: %s", err)
+
     async def async_poll_incoming_sms(self) -> None:
         """Read unread SMS, emit them, and delete each from the modem."""
         async with self._sms_lock:
@@ -445,11 +529,16 @@ class ModemHub:
         self, target: str, message: str, *, force_unicode: bool
     ) -> None:
         last_err: ModemError | None = None
+        recovered = False
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             try:
                 ref = await self._modem.send_sms(target, message, force_unicode)
             except NotRegistered:
-                raise  # not transient — surface immediately
+                # A wedged radio is recoverable, but only try it once per send.
+                if recovered or not await self.async_recover_registration():
+                    raise
+                recovered = True
+                continue
             except ModemError as err:
                 last_err = err
                 LOGGER.warning(

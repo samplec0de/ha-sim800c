@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from custom_components.sim800c import hub as hub_mod
@@ -19,6 +21,7 @@ from custom_components.sim800c.modem import (
     CALL_STAT_ALERTING,
     CALL_STAT_INCOMING,
     CallInfo,
+    NotRegistered,
     SmsMessage,
 )
 
@@ -428,3 +431,132 @@ async def test_poll_incoming_sms_multiple_deletes_each():
     assert [m.text for m in received] == ["One", "Two"]
     assert hub._modem.deleted == [1, 2]  # noqa: SLF001
     assert hub.last_sms == msgs[-1]
+
+
+class RecoveringModem:
+    """Modem stub whose registration only comes back after a radio reset."""
+
+    def __init__(self, *, recovers: bool = True, registered: bool = False) -> None:
+        """Configure whether a radio reset restores registration."""
+        self._recovers = recovers
+        self.registered = registered
+        self.reset_calls = 0
+        self.sent: list[tuple[str, str]] = []
+
+    async def reset_radio(self) -> bool:
+        """Count the radio cycle and re-register if configured to recover."""
+        self.reset_calls += 1
+        if self._recovers:
+            self.registered = True
+        return self.registered
+
+    async def get_registration(self) -> bool:
+        """Report the current registration state."""
+        return self.registered
+
+    async def get_signal(self) -> int | None:
+        """Report a fixed signal strength."""
+        return -70
+
+    async def get_current_call(self) -> CallInfo | None:
+        """Report no call in progress."""
+        return None
+
+    async def send_sms(self, number: str, text: str, force_unicode: bool) -> int:  # noqa: FBT001 — mirrors the real Modem.send_sms signature
+        """Refuse to send while unregistered, mirroring the real modem."""
+        _ = force_unicode
+        if not self.registered:
+            msg = "Modem is not registered on the network"
+            raise NotRegistered(msg)
+        self.sent.append((number, text))
+        return len(self.sent)
+
+
+@pytest.fixture
+def _fast_watchdog(monkeypatch) -> None:
+    """Shrink the registration watchdog's grace period and cooldown."""
+    monkeypatch.setattr(hub_mod, "_REG_GRACE", 0.02)
+    monkeypatch.setattr(hub_mod, "_RECOVERY_COOLDOWN", 0.02)
+
+
+@pytest.mark.usefixtures("_fast_watchdog")
+async def test_watchdog_resets_radio_after_grace_period():
+    hub = make_hub()
+    hub._modem = RecoveringModem()  # noqa: SLF001
+
+    await hub.async_check_registration()  # starts the grace timer
+    await asyncio.sleep(0.03)
+    await hub.async_check_registration()
+
+    assert hub._modem.reset_calls == 1  # noqa: SLF001
+    assert hub.registered is True
+
+
+@pytest.mark.usefixtures("_fast_watchdog")
+async def test_watchdog_waits_out_the_grace_period_before_resetting():
+    hub = make_hub()
+    hub._modem = RecoveringModem()  # noqa: SLF001
+
+    await hub.async_check_registration()
+
+    assert hub._modem.reset_calls == 0  # noqa: SLF001
+
+
+@pytest.mark.usefixtures("_fast_watchdog")
+async def test_watchdog_clears_the_grace_timer_once_registered():
+    hub = make_hub()
+    hub._modem = RecoveringModem(registered=True)  # noqa: SLF001
+
+    await hub.async_check_registration()
+    await asyncio.sleep(0.03)
+    await hub.async_check_registration()
+
+    assert hub._modem.reset_calls == 0  # noqa: SLF001
+    assert hub.registered is True
+
+
+@pytest.mark.usefixtures("_fast_watchdog")
+async def test_watchdog_leaves_the_radio_alone_during_a_call():
+    hub = make_hub()
+    hub._modem = RecoveringModem()  # noqa: SLF001
+
+    await hub.async_check_registration()
+    await asyncio.sleep(0.03)
+    async with hub._call_lock:  # noqa: SLF001
+        await hub.async_check_registration()
+
+    assert hub._modem.reset_calls == 0  # noqa: SLF001
+
+
+async def test_watchdog_does_not_retry_within_the_cooldown(monkeypatch):
+    monkeypatch.setattr(hub_mod, "_REG_GRACE", 0.02)
+    monkeypatch.setattr(hub_mod, "_RECOVERY_COOLDOWN", 30.0)
+    hub = make_hub()
+    hub._modem = RecoveringModem(recovers=False)  # noqa: SLF001
+
+    for _ in range(3):
+        await hub.async_check_registration()
+        await asyncio.sleep(0.03)
+
+    assert hub._modem.reset_calls == 1  # noqa: SLF001
+
+
+async def test_send_sms_recovers_the_radio_and_retries_once():
+    hub = make_hub()
+    hub._modem = RecoveringModem()  # noqa: SLF001
+
+    await hub.async_send_sms(["+79990001122"], "Hi", False)  # noqa: FBT003 — positional force_unicode
+
+    assert hub._modem.reset_calls == 1  # noqa: SLF001
+    assert hub._modem.sent == [("+79990001122", "Hi")]  # noqa: SLF001
+
+
+async def test_send_sms_surfaces_not_registered_when_recovery_fails():
+    hub = make_hub()
+    hub._modem = RecoveringModem(recovers=False)  # noqa: SLF001
+
+    with pytest.raises(NotRegistered):
+        await hub.async_send_sms(["+79990001122"], "Hi", False)  # noqa: FBT003 — positional force_unicode
+
+    assert hub._modem.reset_calls == 1  # noqa: SLF001
+    assert hub._modem.sent == []  # noqa: SLF001

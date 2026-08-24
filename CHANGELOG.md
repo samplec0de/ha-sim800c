@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-08-25
+
+### Added
+- **Automatic recovery from a wedged radio.** A SIM800C that the network de-registers can settle into `AT+CREG?` state `0` (*not registered, not searching*) and stay there indefinitely while still reporting a healthy signal; `AT+COPS=0` answers `ERROR` in that state and only a radio power-cycle re-attaches it. The background monitor now re-reads registration every minute and, after it has been down for 10 minutes, cycles the radio (`AT+CFUN=0` → `AT+CFUN=1`) and waits up to 90s for re-registration. Recoveries are spaced at least 30 minutes apart and are skipped while a call is in progress.
+- `Modem.reset_radio()`: the radio power-cycle itself, re-running `Modem.initialize()` on success because `AT+CFUN` resets SMS text mode and caller-ID reporting.
+- `ModemHub.async_check_registration()` / `ModemHub.async_recover_registration()`: the watchdog and the guarded recovery.
+- `sim800c.send_sms` now makes one recovery attempt when the modem reports itself unregistered, then retries the message once, instead of failing immediately.
+
+### Fixed
+- **SMS sends no longer wedge the modem.** The wait for `+CMGS` was 15s, but the network routinely needs 16-25s to accept a multi-part UCS2 message. On timeout the modem stayed in text-entry mode and swallowed every subsequent AT command, so the retries — and everything else on the serial port — failed until it was power-cycled. The timeout is now 60s, and any failure inside the send transaction sends `ESC` to leave text-entry mode.
+
+### Notes
+- `sensor.sim800c_network` now updates once a minute (previously only on the 5-minute sensor poll).
+
 ## [0.8.0] - 2026-07-11
 
 ### Added
